@@ -5,6 +5,7 @@ export interface ColorSet {
     lineArtUrl: string | null; coloredArtUrl: string | null;
     audioUrl: string | null; videoUrl: string | null;
     createdAt: string;
+    creditCost: number; // 0 = free
 }
 
 export interface AppConfig {

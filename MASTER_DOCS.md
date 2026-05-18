@@ -387,6 +387,8 @@ cmd /c "npm run build && npm run start"
 
 | Date | Task | What Changed |
 |---|---|---|
+| 2026-05-18 | Bug Fix | Fixed JSX syntax error in `/admin/devtools/page.tsx` (Glitter toggle misplaced inside map block) |
+| 2026-05-18 | Smooth Reveal + File Format Guide | Video preload at frame 0 (muted); canvas z-stack: video(10)<canvas(20)<glitter(30)<UI(40); CSS fade-out; glitter sweep CSS animation; 4 new DevTools timing params; GitHub push to Appsmash89/PhaserDev |
 | 2026-05-11 | Admin Sidebar + DevTools | GCP-style sidebar, 3-page admin, config API, DevTools sliders, click-outside brush |
 | 2026-05-11 | UX Overhaul | Brush picker → floating toggle; progress bar → top hairline; video in-place; threshold 0.75; instant reveal |
 | 2026-05-11 | Individual Asset Mgmt | PATCH `/api/sets/[id]`; admin `AssetRow` + `Manage Assets` expand panel |

@@ -6,6 +6,17 @@
     "coloredArtUrl": "/uploads/sets/1778484083054/colored.png",
     "audioUrl": "/uploads/sets/1778484083054/audio.mp3",
     "videoUrl": "/uploads/sets/1778484083054/video.mp4",
-    "createdAt": "2026-05-11T07:21:23.070Z"
+    "createdAt": "2026-05-11T07:21:23.070Z",
+    "creditCost": 0
+  },
+  {
+    "id": "1779092241182",
+    "name": "2",
+    "lineArtUrl": "/uploads/sets/1779092241182/lineart.jpg",
+    "coloredArtUrl": "/uploads/sets/1779092241182/colored.jpg",
+    "audioUrl": null,
+    "videoUrl": "/uploads/sets/1779092241182/video.mp4",
+    "createdAt": "2026-05-18T08:17:21.191Z",
+    "creditCost": 0
   }
 ]

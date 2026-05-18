@@ -234,37 +234,37 @@ export default function DevToolsPage() {
                                 </p>
                             )}
                         </div>
-
-            {/* ── Glitter toggle (boolean, handled separately) ────────── */}
-            {saved && (
-                <div className={`bg-zinc-900/60 border rounded-2xl p-5 transition-all duration-200
-                                 ${saved.glitterEnabled !== (display ? true : false) ? 'border-violet-500/40' : 'border-white/5'}`}>
-                    <div className="flex items-center justify-between gap-4">
-                        <div>
-                            <p className="font-bold text-white text-sm">Glitter Sweep Effect</p>
-                            <p className="text-xs text-zinc-500 mt-1">Show the shimmer beam animation across the screen on completion.</p>
-                        </div>
-                        <button
-                            onClick={() => {
-                                const next = !saved.glitterEnabled;
-                                setSaved(prev => prev ? { ...prev, glitterEnabled: next } : prev);
-                                fetch('/api/config', {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ glitterEnabled: next }),
-                                }).catch(() => {});
-                            }}
-                            className={`relative w-12 h-6 rounded-full transition-colors duration-200
-                                        ${saved.glitterEnabled ? 'bg-violet-600' : 'bg-zinc-700'}`}
-                        >
-                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow
-                                             transition-transform duration-200
-                                             ${saved.glitterEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                        </button>
-                    </div>
-                </div>
-            )}
                     );
                 })}
+
+                {/* ── Glitter toggle (boolean, handled separately) ────────── */}
+                {saved && (
+                    <div className={`bg-zinc-900/60 border rounded-2xl p-5 transition-all duration-200
+                                     ${saved.glitterEnabled !== (display ? true : false) ? 'border-violet-500/40' : 'border-white/5'}`}>
+                        <div className="flex items-center justify-between gap-4">
+                            <div>
+                                <p className="font-bold text-white text-sm">Glitter Sweep Effect</p>
+                                <p className="text-xs text-zinc-500 mt-1">Show the shimmer beam animation across the screen on completion.</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    const next = !saved.glitterEnabled;
+                                    setSaved(prev => prev ? { ...prev, glitterEnabled: next } : prev);
+                                    fetch('/api/config', {
+                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ glitterEnabled: next }),
+                                    }).catch(() => {});
+                                }}
+                                className={`relative w-12 h-6 rounded-full transition-colors duration-200
+                                            ${saved.glitterEnabled ? 'bg-violet-600' : 'bg-zinc-700'}`}
+                            >
+                                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow
+                                                 transition-transform duration-200
+                                                 ${saved.glitterEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Action bar */}

@@ -8,11 +8,12 @@ const SETS_DIR = path.join(process.cwd(), 'public', 'uploads', 'sets');
 export interface ColorSet {
     id: string;
     name: string;
-    lineArtUrl: string;
-    coloredArtUrl: string;
-    audioUrl: string;
-    videoUrl: string;
+    lineArtUrl: string | null;
+    coloredArtUrl: string | null;
+    audioUrl: string | null;
+    videoUrl: string | null;
     createdAt: string;
+    creditCost: number; // 0 = free
 }
 
 function readDB(): ColorSet[] {
@@ -48,11 +49,12 @@ export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData();
 
-        const name      = (formData.get('name') as string) || 'Untitled';
-        const lineArt   = formData.get('lineArt')   as File | null;
+        const name       = (formData.get('name') as string) || 'Untitled';
+        const creditCost = parseInt((formData.get('creditCost') as string) ?? '0', 10) || 0;
+        const lineArt    = formData.get('lineArt')    as File | null;
         const coloredArt = formData.get('coloredArt') as File | null;
-        const audio     = formData.get('audio')     as File | null;
-        const video     = formData.get('video')     as File | null;
+        const audio      = formData.get('audio')      as File | null;
+        const video      = formData.get('video')      as File | null;
 
         if (!lineArt || !coloredArt || !audio || !video) {
             return NextResponse.json(
@@ -73,13 +75,13 @@ export async function POST(request: NextRequest) {
         ]);
 
         const entry: ColorSet = {
-            id,
-            name,
+            id, name,
             lineArtUrl:    `/uploads/sets/${id}/${lineArtFile}`,
             coloredArtUrl: `/uploads/sets/${id}/${coloredArtFile}`,
             audioUrl:      `/uploads/sets/${id}/${audioFile}`,
             videoUrl:      `/uploads/sets/${id}/${videoFile}`,
-            createdAt: new Date().toISOString(),
+            createdAt:     new Date().toISOString(),
+            creditCost,
         };
 
         const sets = readDB();

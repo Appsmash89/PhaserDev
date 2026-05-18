@@ -6,7 +6,7 @@ interface ColorSet {
     id: string; name: string;
     lineArtUrl: string | null; coloredArtUrl: string | null;
     audioUrl: string | null; videoUrl: string | null;
-    createdAt: string;
+    createdAt: string; creditCost: number;
 }
 interface FileSlot { file: File | null; preview: string | null; }
 const emptySlot = (): FileSlot => ({ file: null, preview: null });
@@ -123,6 +123,7 @@ function AssetRow({ setId, assetKey, urlField, label, accept, isImage, currentUr
 export default function GalleryManager() {
     const [sets, setSets]       = useState<ColorSet[]>([]);
     const [name, setName]       = useState('');
+    const [creditCost, setCreditCost] = useState(0);
     const [lineArt, setLineArt] = useState<FileSlot>(emptySlot());
     const [colored, setColored] = useState<FileSlot>(emptySlot());
     const [audio, setAudio]     = useState<FileSlot>(emptySlot());
@@ -145,13 +146,15 @@ export default function GalleryManager() {
         if (!readyToUpload) return;
         setUploading(true); setStatus(null);
         const fd = new FormData();
-        fd.append('name', name.trim()); fd.append('lineArt', lineArt.file!);
+        fd.append('name', name.trim()); fd.append('creditCost', String(creditCost));
+        fd.append('lineArt', lineArt.file!);
         fd.append('coloredArt', colored.file!); fd.append('audio', audio.file!); fd.append('video', video.file!);
         try {
             const res = await fetch('/api/sets', { method: 'POST', body: fd });
             if (!res.ok) throw new Error((await res.json()).error || 'Upload failed');
             setStatus({ type: 'ok', msg: '✅ Set uploaded!' });
-            setName(''); setLineArt(emptySlot()); setColored(emptySlot()); setAudio(emptySlot()); setVideo(emptySlot());
+            setName(''); setCreditCost(0);
+            setLineArt(emptySlot()); setColored(emptySlot()); setAudio(emptySlot()); setVideo(emptySlot());
             fetchSets();
         } catch (e) {
             setStatus({ type: 'err', msg: `❌ ${e instanceof Error ? e.message : 'Error'}` });
@@ -184,6 +187,15 @@ export default function GalleryManager() {
                            placeholder="e.g. Enchanted Forest"
                            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
                                       text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-violet-500" />
+                </div>
+                <div className="mb-5">
+                    <label className="block text-xs font-bold uppercase tracking-widest text-zinc-500 mb-2">
+                        Credit Cost <span className="normal-case text-zinc-700 font-normal">(0 = free)</span>
+                    </label>
+                    <input type="number" min={0} step={10} value={creditCost}
+                           onChange={e => setCreditCost(Math.max(0, parseInt(e.target.value) || 0))}
+                           className="w-32 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
+                                      text-white text-sm focus:outline-none focus:border-violet-500 font-mono" />
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                     <FileDropZone label="Line Art"    accept="image/*" isImage slot={lineArt} onFile={setFile(setLineArt, true)} />
@@ -219,7 +231,13 @@ export default function GalleryManager() {
                                     <p className="text-[11px] text-zinc-500 mt-0.5">
                                         {new Date(set.createdAt).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}
                                     </p>
-                                    <div className="flex gap-1.5 mt-2 flex-wrap">
+                                    <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md
+                                            ${set.creditCost > 0
+                                              ? 'bg-violet-900/40 text-violet-400'
+                                              : 'bg-zinc-800 text-zinc-500'}`}>
+                                            {set.creditCost > 0 ? `💎 ${set.creditCost}` : 'FREE'}
+                                        </span>
                                         {ASSET_CONFIG.map(a => (
                                             <span key={a.key} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md tracking-wide
                                                 ${(set as Record<string,unknown>)[a.urlField] ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>

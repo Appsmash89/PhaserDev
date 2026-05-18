@@ -1,11 +1,11 @@
 {
-  "revealThreshold": 0.97,
+  "revealThreshold": 0.35,
   "brushMin": 30,
   "brushMax": 120,
-  "brushDefault": 40,
+  "brushDefault": 120,
   "audioVolume": 0.85,
   "lineArtFadeDuration": 700,
-  "coloredFadeDuration": 900,
+  "coloredFadeDuration": 100,
   "glitterEnabled": true,
-  "glitterDuration": 1100
+  "glitterDuration": 2500
 }

@@ -1,1 +1,2 @@
 @AGENTS.md
+@MASTER_DOCS.md

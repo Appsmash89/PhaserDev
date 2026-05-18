@@ -18,9 +18,8 @@ export class Preloader extends Phaser.Scene {
     });
 
     // Load game assets
-    this.load.setPath('https://labs.phaser.io/assets/');
-    this.load.image('logo', 'sprites/phaser3-logo.png');
-    this.load.image('red', 'particles/red.png');
+    this.load.setPath('/assets/');
+    this.load.image('lineart', 'lineart.png');
   }
 
   create() {

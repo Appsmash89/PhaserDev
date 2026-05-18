@@ -1,130 +1,366 @@
 'use client';
 
-import { forwardRef, useLayoutEffect, useRef, useState } from 'react';
+import { forwardRef, useLayoutEffect, useRef, useState, useEffect, useCallback } from 'react';
 import { StartGame } from '@/game/game';
 import { EventBus } from '@/game/EventBus';
 import { useGameStore } from '@/store/useGameStore';
+import Gallery from './Gallery';
 
-export interface IRefPhaserGame {
-    game: Phaser.Game | null;
-}
+export interface IRefPhaserGame { game: Phaser.Game | null; }
 
 export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref) {
     const gameContainerRef = useRef<HTMLDivElement>(null);
-    const gameInstanceRef = useRef<Phaser.Game | null>(null);
-    
-    // State Sync
-    const addScore = useGameStore((state) => state.addScore);
-    const { score, highScore, isPaused, togglePause, settings, updateSettings } = useGameStore();
-    const [showSettings, setShowSettings] = useState(false);
+    const gameInstanceRef  = useRef<Phaser.Game | null>(null);
+    const audioRef         = useRef<HTMLAudioElement>(null);
+    const videoRef         = useRef<HTMLVideoElement>(null);
+    const canvasFadeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    const {
+        gameState, setGameState, selectedSet,
+        brushSize, setBrushSize,
+        isAssetLoading, appConfig, setAppConfig,
+    } = useGameStore();
+
+    const [revealPct, setRevealPct]             = useState(0);
+    const [canvasFading, setCanvasFading]       = useState(false);  // CSS opacity 1→0
+    const [canvasHidden, setCanvasHidden]       = useState(false);  // remove from DOM
+    const [showGlitter, setShowGlitter]         = useState(false);
+    const [showBrushPicker, setShowBrushPicker] = useState(false);
+    const [videoReady, setVideoReady]           = useState(false);
+
+    // ── Fetch config on mount ─────────────────────────────────────────
+    useEffect(() => {
+        fetch('/api/config')
+            .then(r => r.json())
+            .then(cfg => { setAppConfig(cfg); setBrushSize(cfg.brushDefault); })
+            .catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // ── Boot Phaser once ──────────────────────────────────────────────
     useLayoutEffect(() => {
         if (gameContainerRef.current && !gameInstanceRef.current) {
             const game = StartGame(gameContainerRef.current.id);
             gameInstanceRef.current = game;
-            
-            if (ref) {
-                if (typeof ref === 'function') {
-                    ref({ game });
-                } else {
-                    ref.current = { game };
-                }
+            if (ref) typeof ref === 'function' ? ref({ game }) : (ref.current = { game });
+            return () => { gameInstanceRef.current?.destroy(true); gameInstanceRef.current = null; };
+        }
+    }, [ref]);
+
+    // ── Sync brush size to Phaser ─────────────────────────────────────
+    useLayoutEffect(() => {
+        if (gameInstanceRef.current) EventBus.emit('ui-brush-size', brushSize);
+    }, [brushSize]);
+
+    // ── Reset state when set changes ──────────────────────────────────
+    const prevSetIdRef = useRef<string | null>(null);
+    useLayoutEffect(() => {
+        if (gameInstanceRef.current && gameState === 'PLAYING' && selectedSet) {
+            if (prevSetIdRef.current !== selectedSet.id) {
+                prevSetIdRef.current = selectedSet.id;
+                // Reset transition state
+                setRevealPct(0);
+                setCanvasFading(false);
+                setCanvasHidden(false);
+                setShowGlitter(false);
+                setShowBrushPicker(false);
+                setVideoReady(false);
+                if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
+                gameInstanceRef.current.scene.start('MainGame');
+            }
+        }
+    }, [selectedSet, gameState]);
+
+    // ── PRE-LOAD VIDEO at first frame (muted) when set loads ─────────
+    // This eliminates the black-flash by having the video GPU-ready before reveal
+    useEffect(() => {
+        const v = videoRef.current;
+        if (!v || !selectedSet?.videoUrl || gameState !== 'PLAYING') return;
+
+        v.muted = true;
+        v.src = selectedSet.videoUrl;
+        v.load();
+
+        const primeVideo = () => {
+            // Play briefly, wait for first frame, then pause
+            const onFirstFrame = () => {
+                v.pause();
+                v.removeEventListener('timeupdate', onFirstFrame);
+                setVideoReady(true);
+            };
+            v.addEventListener('timeupdate', onFirstFrame, { once: true });
+            v.play().catch(() => {
+                // Autoplay blocked — video will still work on reveal, just no pre-prime
+                setVideoReady(true);
+            });
+        };
+
+        if (v.readyState >= 2) {
+            primeVideo();
+        } else {
+            v.addEventListener('canplay', primeVideo, { once: true });
+        }
+
+        return () => {
+            v.removeEventListener('canplay', primeVideo);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedSet?.videoUrl, gameState]);
+
+    // ── EventBus listeners ────────────────────────────────────────────
+    useEffect(() => {
+        const onProgress = (pct: number) => setRevealPct(pct);
+
+        // Fires at threshold: start the full reveal sequence
+        const onThreshold = () => {
+            const { audioVolume, lineArtFadeDuration, coloredFadeDuration, glitterEnabled, glitterDuration } = useGameStore.getState().appConfig;
+
+            // 1. Play celebration audio
+            if (audioRef.current) {
+                audioRef.current.volume = audioVolume;
+                audioRef.current.play().catch(() => {});
             }
 
-            // Sync Score from Phaser
-            EventBus.on('game-score-increment', (amount: number) => {
-                addScore(amount);
-            });
+            // 2. Un-mute & play video (already at first frame)
+            const v = videoRef.current;
+            if (v) {
+                v.muted = false;
+                v.currentTime = 0;
+                v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+            }
 
-            return () => {
-                if (gameInstanceRef.current) {
-                    gameInstanceRef.current.destroy(true);
-                    gameInstanceRef.current = null;
-                    EventBus.removeListener('game-score-increment');
-                }
-            };
-        }
-    }, [ref, addScore]);
+            // 3. Glitter sweep
+            if (glitterEnabled) {
+                setShowGlitter(true);
+                setTimeout(() => setShowGlitter(false), glitterDuration + 300);
+            }
 
-    // Sync Pause State to Phaser
-    useLayoutEffect(() => {
-        if (gameInstanceRef.current) {
-            EventBus.emit('ui-pause-toggle', isPaused);
-        }
-    }, [isPaused]);
+            // 4. Start canvas fade-out after line art is half-done fading
+            const canvasFadeDelay = Math.max(0, lineArtFadeDuration * 0.4);
+            canvasFadeTimer.current = setTimeout(() => {
+                setCanvasFading(true);
+                // Remove canvas from DOM after fade finishes
+                canvasFadeTimer.current = setTimeout(() => {
+                    setCanvasHidden(true);
+                }, coloredFadeDuration + 100);
+            }, canvasFadeDelay);
+        };
+
+        // Fires when Phaser line-art tween completes (canvas may still be fading via CSS)
+        const onComplete = () => {
+            // Ensure canvas eventually hides even if timer is off
+            const { coloredFadeDuration } = useGameStore.getState().appConfig;
+            setTimeout(() => setCanvasHidden(true), coloredFadeDuration + 200);
+        };
+
+        EventBus.on('reveal-progress', onProgress);
+        EventBus.on('reveal-threshold', onThreshold);
+        EventBus.on('reveal-complete',  onComplete);
+        return () => {
+            EventBus.off('reveal-progress', onProgress);
+            EventBus.off('reveal-threshold', onThreshold);
+            EventBus.off('reveal-complete',  onComplete);
+        };
+    }, []); // intentionally stable — reads appConfig from store directly
+
+    const handleBack = useCallback(() => {
+        setRevealPct(0);
+        setCanvasFading(false); setCanvasHidden(false);
+        setShowGlitter(false); setShowBrushPicker(false); setVideoReady(false);
+        if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
+        audioRef.current?.pause();
+        if (audioRef.current) audioRef.current.currentTime = 0;
+        const v = videoRef.current;
+        if (v) { v.pause(); v.muted = true; v.currentTime = 0; }
+        setGameState('GALLERY');
+    }, [setGameState]);
+
+    const pct = Math.round(revealPct * 100);
+    const thresholdPct = Math.round(appConfig.revealThreshold * 100);
 
     return (
-        <div id="game-container" ref={gameContainerRef} className="w-full h-full relative overflow-hidden bg-black flex items-center justify-center">
-            {/* The Zero-Line UI Overlay Layer */}
-            <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-8 font-sans">
-                
-                {/* HUD Elements */}
-                <div className="flex justify-between items-start pointer-events-auto w-full">
-                    <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6 shadow-2xl transition-all hover:scale-105 active:scale-95 group">
-                        <h2 className="text-white/60 text-xs font-bold uppercase tracking-widest mb-1 group-hover:text-blue-400 transition-colors">Current Score</h2>
-                        <div className="text-4xl font-black text-white tabular-nums tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
-                            {score.toLocaleString()}
-                        </div>
-                    </div>
+        <div className="absolute inset-0 bg-white">
 
-                    <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-700/50 rounded-2xl p-6 shadow-xl">
-                        <h2 className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-1 text-right">Best Record</h2>
-                        <div className="text-4xl font-black text-zinc-300 tabular-nums tracking-tighter text-right">
-                            {highScore.toLocaleString()}
-                        </div>
-                    </div>
-                </div>
+            {/* ── Gallery ─────────────────────────────────────────────── */}
+            {gameState === 'GALLERY' && <Gallery />}
 
-                {/* Status/Notification System */}
-                <div className="absolute left-8 top-1/2 -translate-y-1/2 flex flex-col gap-4 pointer-events-none">
-                    <div className="bg-gradient-to-r from-blue-600/20 to-transparent p-4 border-l-4 border-blue-500 backdrop-blur-sm animate-in slide-in-from-left duration-700">
-                        <p className="text-white font-medium italic text-sm">PHASER DEV ACTIVE</p>
-                    </div>
-                </div>
+            {/* ── Hidden celebration audio ──────────────────────────── */}
+            <audio ref={audioRef} src={selectedSet?.audioUrl ?? undefined} preload="auto" />
 
-                {/* Bottom Navigation Controls */}
-                <div className="flex justify-center pointer-events-auto">
-                    <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 p-2 rounded-3xl flex gap-2 shadow-2xl">
-                        <button 
-                            onClick={togglePause}
-                            className={`px-8 py-4 ${isPaused ? 'bg-red-600' : 'bg-blue-600'} hover:opacity-90 text-white rounded-2xl font-bold transition-all active:scale-95`}
-                        >
-                            {isPaused ? 'RESUME' : 'PAUSE'}
-                        </button>
-                        <button 
-                            onClick={() => setShowSettings(true)}
-                            className="px-8 py-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl font-bold transition-all active:scale-95"
-                        >
-                            SETTINGS
-                        </button>
-                    </div>
-                </div>
-            </div>
+            {/* ── Video — z-10, ALWAYS behind canvas, pre-loaded ─────── */}
+            {/* Sits underneath Phaser. Visible once canvas fades out.   */}
+            {selectedSet?.videoUrl && gameState === 'PLAYING' && (
+                <video
+                    ref={videoRef}
+                    className="absolute inset-0 z-10 w-full h-full object-contain bg-white"
+                    playsInline
+                    loop
+                    muted // starts muted; un-muted in onThreshold
+                    preload="auto"
+                    onClick={() => {
+                        const v = videoRef.current;
+                        if (!v || !canvasHidden) return;
+                        v.paused ? v.play() : v.pause();
+                    }}
+                />
+            )}
 
-            {/* PAUSE OVERLAY */}
-            {isPaused && (
-                <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-8">
-                    <div className="text-center animate-in zoom-in duration-300">
-                        <h1 className="text-6xl font-black text-white mb-8 tracking-tighter">GAME PAUSED</h1>
-                        <button onClick={togglePause} className="px-12 py-5 bg-blue-600 text-white rounded-2xl font-bold text-xl shadow-2xl">RESUME</button>
-                    </div>
+            {/* ── Phaser canvas — z-20, fades out on completion ──────── */}
+            {!canvasHidden && (
+                <div
+                    id="game-container"
+                    ref={gameContainerRef}
+                    className="absolute inset-0 z-20 overflow-hidden bg-white w-full h-full"
+                    style={{
+                        opacity: gameState === 'GALLERY' ? 0 : canvasFading ? 0 : 1,
+                        pointerEvents: gameState === 'GALLERY' || canvasFading ? 'none' : 'auto',
+                        transition: canvasFading
+                            ? `opacity ${appConfig.coloredFadeDuration}ms ease-in-out`
+                            : undefined,
+                    }}
+                />
+            )}
+
+            {/* ── Glitter sweep — z-30, plays once on threshold ──────── */}
+            {showGlitter && appConfig.glitterEnabled && (
+                <div
+                    className="absolute inset-0 z-30 overflow-hidden pointer-events-none"
+                    style={{ '--glitter-dur': `${appConfig.glitterDuration}ms` } as React.CSSProperties}
+                >
+                    {/* Primary soft beam */}
+                    <div
+                        className="absolute inset-0 glitter-sweep-active"
+                        style={{
+                            background: 'linear-gradient(90deg, transparent 0%, rgba(255,235,130,0.10) 25%, rgba(255,255,255,0.38) 50%, rgba(255,235,130,0.10) 75%, transparent 100%)',
+                        }}
+                    />
+                    {/* Secondary narrower sparkle */}
+                    <div
+                        className="absolute inset-0 glitter-sweep-active"
+                        style={{
+                            background: 'linear-gradient(90deg, transparent 35%, rgba(255,255,255,0.55) 50%, transparent 65%)',
+                            animationDelay: '80ms',
+                        }}
+                    />
                 </div>
             )}
 
-            {/* SETTINGS MODAL */}
-            {showSettings && (
-                <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-center justify-center p-8">
-                    <div className="bg-zinc-900 border border-zinc-800 w-full max-w-xl rounded-3xl p-10">
-                        <div className="flex justify-between items-center mb-10">
-                            <h2 className="text-3xl font-black text-white">System Settings</h2>
-                            <button onClick={() => setShowSettings(false)} className="text-zinc-500">CLOSE</button>
-                        </div>
-                        <div className="space-y-8">
-                            <div className="space-y-4">
-                                <label className="text-zinc-400 text-xs font-bold uppercase">Volume</label>
-                                <input type="range" min="0" max="1" step="0.1" value={settings.musicVolume} onChange={(e) => updateSettings({ musicVolume: parseFloat(e.target.value) })} className="w-full" />
+            {/* ── Back button — visible when video is showing ─────────── */}
+            {canvasHidden && gameState === 'PLAYING' && (
+                <button
+                    onClick={handleBack}
+                    className="absolute top-4 right-4 z-50 w-9 h-9 rounded-full
+                               bg-black/20 backdrop-blur-sm text-white
+                               flex items-center justify-center
+                               hover:bg-black/35 transition-all active:scale-90"
+                    aria-label="Back to gallery"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                         viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 6 6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            )}
+
+            {/* ── Editor UI overlay — z-40, hidden once canvas gone ──── */}
+            {gameState === 'PLAYING' && !canvasHidden && (
+                <div className="absolute inset-0 z-40 pointer-events-none font-sans">
+
+                    {/* Loading spinner */}
+                    {isAssetLoading && (
+                        <div className="absolute inset-0 bg-white/85 backdrop-blur-sm z-50
+                                        flex items-center justify-center pointer-events-auto">
+                            <div className="flex flex-col items-center gap-4">
+                                <svg className="animate-spin h-12 w-12 text-zinc-900"
+                                     fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10"
+                                            stroke="currentColor" strokeWidth="4"/>
+                                    <path className="opacity-75" fill="currentColor"
+                                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                                </svg>
+                                <p className="text-zinc-500 font-semibold animate-pulse text-sm">
+                                    Preparing magic canvas…
+                                </p>
                             </div>
                         </div>
+                    )}
+
+                    {/* Top bar */}
+                    <div className="absolute top-0 left-0 right-0 pointer-events-auto">
+                        <div className="w-full h-14 bg-white/90 backdrop-blur-md border-b border-zinc-100
+                                        flex items-center justify-between px-4
+                                        shadow-[0_1px_8px_-2px_rgba(0,0,0,0.05)]">
+                            <button onClick={handleBack}
+                                    className="p-3 rounded-full bg-zinc-50 text-zinc-400
+                                               hover:text-zinc-900 hover:bg-zinc-100 transition-all active:scale-90"
+                                    aria-label="Back">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"
+                                     viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="m15 18-6-6 6-6"/>
+                                </svg>
+                            </button>
+                            <span className="font-extrabold text-zinc-900 tracking-tight text-base truncate px-2">
+                                {selectedSet?.name ?? 'My Artwork'}
+                            </span>
+                            <span className="text-xs font-semibold text-zinc-400 min-w-[36px] text-right">
+                                {pct}%
+                            </span>
+                        </div>
+
+                        {/* Hairline progress strip */}
+                        <div className="w-full h-[3px] bg-zinc-100">
+                            <div className="h-full transition-all duration-500 ease-out"
+                                 style={{
+                                     width: `${pct}%`,
+                                     background: pct >= thresholdPct
+                                         ? 'rgba(251,191,36,0.55)'
+                                         : 'rgba(167,139,250,0.45)',
+                                 }} />
+                        </div>
+                    </div>
+
+                    {/* Click-outside overlay for brush picker */}
+                    {showBrushPicker && (
+                        <div className="absolute inset-0 z-[15] pointer-events-auto"
+                             onClick={() => setShowBrushPicker(false)} aria-hidden="true" />
+                    )}
+
+                    {/* Floating brush toggle — bottom right */}
+                    <div className="absolute bottom-8 right-5 z-[20] pointer-events-auto flex flex-col items-end gap-3">
+                        {showBrushPicker && (
+                            <div className="bg-white/95 backdrop-blur-md shadow-2xl rounded-2xl
+                                            px-5 py-4 flex flex-col gap-3 w-52 border border-zinc-100"
+                                 onClick={e => e.stopPropagation()}>
+                                <p className="text-[11px] font-bold uppercase tracking-widest
+                                              text-zinc-400 text-center">Brush Size</p>
+                                <input type="range"
+                                       min={appConfig.brushMin} max={appConfig.brushMax} value={brushSize}
+                                       onChange={e => setBrushSize(parseInt(e.target.value))}
+                                       className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-zinc-900" />
+                                <div className="flex items-center justify-between px-0.5">
+                                    <div className="w-3 h-3 rounded-full bg-zinc-300" />
+                                    <span className="text-xs font-semibold text-zinc-500">{brushSize}px</span>
+                                    <div className="w-6 h-6 rounded-full bg-zinc-300" />
+                                </div>
+                            </div>
+                        )}
+                        <button
+                            onClick={() => setShowBrushPicker(p => !p)}
+                            className={`w-14 h-14 rounded-full shadow-xl flex items-center justify-center
+                                        transition-all duration-200 active:scale-90
+                                        ${showBrushPicker
+                                          ? 'bg-zinc-900 text-white'
+                                          : 'bg-white text-zinc-600 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)]'}`}
+                            aria-label="Brush size">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/>
+                                <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/>
+                            </svg>
+                        </button>
                     </div>
                 </div>
             )}

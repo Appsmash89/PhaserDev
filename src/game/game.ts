@@ -9,10 +9,13 @@ export const StartGame = (parent: string) => {
         parent: parent,
         width: 1024,
         height: 768,
-        backgroundColor: '#000000',
+        backgroundColor: '#ffffff',
+        transparent: false,
         scale: {
-            mode: Phaser.Scale.RESIZE,
+            mode: Phaser.Scale.FIT,
             autoCenter: Phaser.Scale.CENTER_BOTH,
+            width: 1080,
+            height: 1920,
         },
         physics: {
             default: 'arcade',

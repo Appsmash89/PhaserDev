@@ -116,7 +116,7 @@ export default function DevToolsPage() {
         setSaving(true);
         const payload = Object.fromEntries(
             PARAMS.map(p => [p.key, p.fromDisplay(display[p.key])])
-        ) as AppConfig;
+        ) as unknown as AppConfig;
         try {
             const res = await fetch('/api/config', {
                 method: 'POST',

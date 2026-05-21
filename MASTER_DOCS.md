@@ -387,6 +387,8 @@ cmd /c "npm run build && npm run start"
 
 | Date | Task | What Changed |
 |---|---|---|
+| 2026-05-19 | Bug Fix | Fixed TypeScript type error during Vercel build in `/admin/devtools/page.tsx` (AppConfig overlap issue) |
+| 2026-05-19 | Critical Bug Fix + Next.js Upgrade | Fixed: game-container never unmounted (destroyed WebGL canvas); prevSetIdRef reset on back; all-CSS hiding. Next.js upgraded 15.x → 16.2.6. 10/10 tests PASS. |
 | 2026-05-18 | Firebase F2P Economy Architecture | Anonymous Auth, Firestore ledger, earn/purchase APIs (server-authoritative), MonetizationModal (offer wall), 15s Ad countdown, gallery gateway flow, creditCost in admin/sets, Basic Auth middleware for /admin |
 | 2026-05-18 | Bug Fix | Fixed JSX syntax error in `/admin/devtools/page.tsx` (Glitter toggle misplaced inside map block) |
 | 2026-05-18 | Smooth Reveal + File Format Guide | Video preload at frame 0 (muted); canvas z-stack: video(10)<canvas(20)<glitter(30)<UI(40); CSS fade-out; glitter sweep CSS animation; 4 new DevTools timing params; GitHub push to Appsmash89/PhaserDev |

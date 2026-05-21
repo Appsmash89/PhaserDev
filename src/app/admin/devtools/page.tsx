@@ -84,7 +84,7 @@ type DisplayConfig = Record<keyof AppConfig, number>;
 
 function toDisplayConfig(cfg: AppConfig): DisplayConfig {
     return Object.fromEntries(
-        PARAMS.map(p => [p.key, p.toDisplay((cfg as Record<string,number>)[p.key] ?? 0)])
+        PARAMS.map(p => [p.key, p.toDisplay((cfg as any)[p.key] ?? 0)])
     ) as DisplayConfig;
 }
 
@@ -108,7 +108,7 @@ export default function DevToolsPage() {
 
     const isDirty = (): boolean => {
         if (!saved || !display) return false;
-        return PARAMS.some(p => p.toDisplay(saved[p.key]) !== display[p.key]);
+        return PARAMS.some(p => p.toDisplay((saved as any)[p.key]) !== display[p.key]);
     };
 
     const handleSave = async () => {
@@ -172,7 +172,7 @@ export default function DevToolsPage() {
             <div className="flex flex-col gap-5">
                 {PARAMS.map(param => {
                     const val = display[param.key];
-                    const savedVal = param.toDisplay(saved[param.key]);
+                    const savedVal = param.toDisplay((saved as any)[param.key]);
                     const changed = val !== savedVal;
 
                     return (

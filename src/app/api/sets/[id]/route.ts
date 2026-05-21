@@ -63,14 +63,14 @@ export async function PATCH(
         if (!urlKey) return NextResponse.json({ error: 'Invalid assetType' }, { status: 400 });
 
         // Delete the file
-        const currentUrl: string = (set as Record<string, string>)[urlKey] ?? '';
+        const currentUrl: string = (set as any)[urlKey] ?? '';
         if (currentUrl) {
             const filePath = path.join(process.cwd(), 'public', currentUrl);
             try { fs.unlinkSync(filePath); } catch { /* ignore */ }
         }
 
         // Null the field in DB
-        (set as Record<string, string | null>)[urlKey] = null;
+        (set as any)[urlKey] = null;
         writeDB(sets);
         return NextResponse.json(set);
     }
@@ -89,7 +89,7 @@ export async function PATCH(
         if (!urlKey) return NextResponse.json({ error: 'Invalid assetType' }, { status: 400 });
 
         // Delete old file
-        const oldUrl: string = (set as Record<string, string>)[urlKey] ?? '';
+        const oldUrl: string = (set as any)[urlKey] ?? '';
         if (oldUrl) {
             try { fs.unlinkSync(path.join(process.cwd(), 'public', oldUrl)); } catch { /* ignore */ }
         }
@@ -104,7 +104,7 @@ export async function PATCH(
         const buffer   = Buffer.from(await file.arrayBuffer());
         fs.writeFileSync(path.join(setDir, filename), buffer);
 
-        (set as Record<string, string>)[urlKey] = `/uploads/sets/${id}/${filename}`;
+        (set as any)[urlKey] = `/uploads/sets/${id}/${filename}`;
         writeDB(sets);
         return NextResponse.json(set);
     }

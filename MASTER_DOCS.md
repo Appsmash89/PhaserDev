@@ -387,6 +387,7 @@ cmd /c "npm run build && npm run start"
 
 | Date | Task | What Changed |
 |---|---|---|
+| 2026-05-21 | Bug Fix | Fixed all remaining strict TypeScript errors across codebase (Gallery ColorSet casting, /api/sets PATCH casts, MainGame texture refresh & null checks) |
 | 2026-05-21 | Bug Fix | Fixed additional TypeScript type error during Vercel build in `/admin/devtools/page.tsx` (payload casting issue) |
 | 2026-05-19 | Bug Fix | Fixed TypeScript type error during Vercel build in `/admin/devtools/page.tsx` (AppConfig overlap issue) |
 | 2026-05-19 | Critical Bug Fix + Next.js Upgrade | Fixed: game-container never unmounted (destroyed WebGL canvas); prevSetIdRef reset on back; all-CSS hiding. Next.js upgraded 15.x → 16.2.6. 10/10 tests PASS. |

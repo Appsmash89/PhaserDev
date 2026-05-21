@@ -69,7 +69,7 @@ function AssetRow({ setId, assetKey, urlField, label, accept, isImage, currentUr
             const res = await fetch(`/api/sets/${setId}`, { method: 'PATCH', body: fd });
             if (!res.ok) throw new Error();
             const updated: ColorSet = await res.json();
-            onUpdated((updated as Record<string, string>)[urlField] ?? '');
+            onUpdated((updated as any)[urlField] ?? '');
         } catch { /* ignore */ } finally { setBusy(false); }
     };
 
@@ -240,7 +240,7 @@ export default function GalleryManager() {
                                         </span>
                                         {ASSET_CONFIG.map(a => (
                                             <span key={a.key} className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md tracking-wide
-                                                ${(set as Record<string,unknown>)[a.urlField] ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>
+                                                ${(set as any)[a.urlField] ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>
                                                 {a.label}
                                             </span>
                                         ))}
@@ -267,7 +267,7 @@ export default function GalleryManager() {
                                     {ASSET_CONFIG.map(a => (
                                         <AssetRow key={a.key} setId={set.id} assetKey={a.key} urlField={a.urlField}
                                             label={a.label} accept={a.accept} isImage={a.isImage}
-                                            currentUrl={(set as Record<string,string|null>)[a.urlField]}
+                                            currentUrl={(set as any)[a.urlField]}
                                             onUpdated={url => setSets(prev => prev.map(s => s.id === set.id ? { ...s, [a.urlField]: url } : s))}
                                             onDeleted={() => setSets(prev => prev.map(s => s.id === set.id ? { ...s, [a.urlField]: null } : s))}
                                         />

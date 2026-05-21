@@ -54,7 +54,7 @@ export class MainGame extends Phaser.Scene {
 
         // 3. Read current set from store and load assets
         const set = useGameStore.getState().selectedSet;
-        if (set) {
+        if (set && set.lineArtUrl && set.coloredArtUrl) {
             this.loadSet(set.lineArtUrl, set.coloredArtUrl);
         }
 
@@ -99,7 +99,7 @@ export class MainGame extends Phaser.Scene {
             this.paintLineArtToCanvas(lineKey, W, H);
 
             // Refresh texture so Phaser picks up the new canvas pixels
-            this.textures.get(this.maskTexKey).refresh();
+            (this.textures.get(this.maskTexKey) as Phaser.Textures.CanvasTexture).refresh();
 
             // Re-fit mask image
             this.maskImage.setScale(1); // mask canvas is full canvas size
@@ -223,7 +223,7 @@ export class MainGame extends Phaser.Scene {
         this.maskCtx.globalCompositeOperation = 'source-over';
 
         // Refresh Phaser texture
-        this.textures.get(this.maskTexKey).refresh();
+        (this.textures.get(this.maskTexKey) as Phaser.Textures.CanvasTexture).refresh();
     }
 
     // ─────────────────────────────────────────────────────────────────────

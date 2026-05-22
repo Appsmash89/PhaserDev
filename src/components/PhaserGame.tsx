@@ -1,10 +1,29 @@
 'use client';
 
+/**
+ * PhaserGame — orchestrates the Phaser engine + media playback.
+ *
+ * State management:
+ *   - Reveal state (revealPhase, revealPct, showGlitter) → READ from useGameStore
+ *   - Config (volumes, durations) → READ from useConfigStore
+ *   - Brush size → READ from useGameStore
+ *   - showBrushPicker → LOCAL (pure ephemeral UI toggle, used nowhere else)
+ *
+ * EventBus bridge:
+ *   - Phaser emits events → this component translates them into store actions
+ *   - This is the only legitimate crossing point between Phaser's imperative
+ *     world and React's declarative state.
+ *
+ * Rule 4: All EventBus subscriptions, timers, and video/audio refs are
+ *         explicitly torn down in their respective cleanup functions.
+ */
+
 import { forwardRef, useLayoutEffect, useRef, useState, useEffect, useCallback } from 'react';
-import { StartGame } from '@/game/game';
-import { EventBus } from '@/game/EventBus';
-import { useGameStore } from '@/store/useGameStore';
-import Gallery from './Gallery';
+import { StartGame }        from '@/game/game';
+import { EventBus }         from '@/game/EventBus';
+import { useGameStore }     from '@/store/useGameStore';
+import { useConfigStore }   from '@/store/useConfigStore';
+import Gallery              from './Gallery';
 
 export interface IRefPhaserGame { game: Phaser.Game | null; }
 
@@ -15,71 +34,84 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
     const videoRef         = useRef<HTMLVideoElement>(null);
     const canvasFadeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // ── Store selectors ──────────────────────────────────────────────────
     const {
-        gameState, setGameState, selectedSet,
-        brushSize, setBrushSize,
-        isAssetLoading, appConfig, setAppConfig,
+        gamePhase,
+        selectedSet,
+        brushSize,
+        setBrushSize,
+        isAssetLoading,
+        revealPhase,
+        revealPct,
+        showGlitter,
+        startSession: _startSession,
+        endSession,
+        setRevealPct,
+        onRevealThreshold,
+        onRevealComplete,
+        dismissGlitter,
     } = useGameStore();
 
-    const [revealPct, setRevealPct]             = useState(0);
-    const [canvasFading, setCanvasFading]       = useState(false);
-    // NOTE: canvasHidden hides via CSS only — we NEVER unmount #game-container.
-    // Unmounting destroys Phaser's WebGL canvas permanently.
-    const [canvasHidden, setCanvasHidden]       = useState(false);
-    const [showGlitter, setShowGlitter]         = useState(false);
+    const { config: appConfig } = useConfigStore();
+
+    // ── Pure ephemeral UI state (Rule 1) ─────────────────────────────────
     const [showBrushPicker, setShowBrushPicker] = useState(false);
     const [videoReady, setVideoReady]           = useState(false);
 
-    // ── Fetch config on mount ─────────────────────────────────────────
-    useEffect(() => {
-        fetch('/api/config')
-            .then(r => r.json())
-            .then(cfg => { setAppConfig(cfg); setBrushSize(cfg.brushDefault); })
-            .catch(() => {});
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    // ── Derived booleans ──────────────────────────────────────────────────
+    const isPlaying    = gamePhase === 'PLAYING';
+    const isComplete   = gamePhase === 'COMPLETE';
+    const canvasHidden = isComplete || revealPhase === 'FADING' || revealPhase === 'COMPLETE';
+    const canvasFading = revealPhase === 'THRESHOLD';
+    const pct          = Math.round(revealPct * 100);
+    const thresholdPct = Math.round(appConfig.revealThreshold * 100);
 
-    // ── Boot Phaser once, NEVER destroy on re-render ──────────────────
+    // ── Boot Phaser once — NEVER destroy ──────────────────────────────────
+    // Removing #game-container from the DOM permanently destroys the
+    // WebGL context. We hide it via CSS only (opacity/visibility).
     useLayoutEffect(() => {
         if (gameContainerRef.current && !gameInstanceRef.current) {
             const game = StartGame(gameContainerRef.current.id);
             gameInstanceRef.current = game;
             if (ref) typeof ref === 'function' ? ref({ game }) : (ref.current = { game });
-            // Do NOT return a cleanup that destroys — game lives for the app lifetime
         }
+        // No cleanup — game lives for the entire app lifetime
     }, [ref]);
 
-    // ── Sync brush size to Phaser ─────────────────────────────────────
+    // ── Sync brush size to Phaser via EventBus ────────────────────────────
     useLayoutEffect(() => {
-        if (gameInstanceRef.current) EventBus.emit('ui-brush-size', brushSize);
+        EventBus.emit('ui-brush-size', brushSize);
     }, [brushSize]);
 
-    // ── Reset & restart scene when set changes ────────────────────────
-    // prevSetIdRef tracks the LAST started set. Reset to null on back so same set can restart.
+    // ── Initialize brush from config on first load ────────────────────────
+    useEffect(() => {
+        if (appConfig.brushDefault !== brushSize) {
+            setBrushSize(appConfig.brushDefault);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [appConfig.brushDefault]);
+
+    // ── Restart scene when selectedSet changes ────────────────────────────
+    // Using a ref to guard against the same set being re-selected.
+    // prevSetId is reset by endSession() (called on back) so same set can re-open.
     const prevSetIdRef = useRef<string | null>(null);
     useLayoutEffect(() => {
-        if (gameInstanceRef.current && gameState === 'PLAYING' && selectedSet) {
-            if (prevSetIdRef.current !== selectedSet.id) {
-                prevSetIdRef.current = selectedSet.id;
-                setRevealPct(0);
-                setCanvasFading(false);
-                setCanvasHidden(false);
-                setShowGlitter(false);
-                setShowBrushPicker(false);
-                setVideoReady(false);
-                if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
-                gameInstanceRef.current.scene.start('MainGame');
-            }
-        }
-    }, [selectedSet, gameState]);
+        if (!gameInstanceRef.current || !isPlaying || !selectedSet) return;
+        if (prevSetIdRef.current === selectedSet.id) return;
 
-    // ── Pre-load video at first frame (muted) ────────────────────────
+        prevSetIdRef.current = selectedSet.id;
+        setVideoReady(false);
+        if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
+        gameInstanceRef.current.scene.start('MainGame');
+    }, [selectedSet, isPlaying]);
+
+    // ── Pre-load video at frame 0 (muted) — eliminates black-flash ───────
     useEffect(() => {
         const v = videoRef.current;
-        if (!v || !selectedSet?.videoUrl || gameState !== 'PLAYING') return;
+        if (!v || !selectedSet?.videoUrl || !isPlaying) return;
 
         v.muted = true;
-        v.src = selectedSet.videoUrl;
+        v.src   = selectedSet.videoUrl;
         v.load();
 
         const primeVideo = () => {
@@ -98,25 +130,30 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
             v.addEventListener('canplay', primeVideo, { once: true });
         }
 
+        // Rule 4: tear down event listener if effect re-runs
         return () => { v.removeEventListener('canplay', primeVideo); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedSet?.videoUrl, gameState]);
+    }, [selectedSet?.videoUrl, isPlaying]);
 
-    // ── EventBus listeners ────────────────────────────────────────────
+    // ── EventBus → Store bridge ───────────────────────────────────────────
+    // This is the ONLY place EventBus events are translated into store actions.
     useEffect(() => {
         const onProgress = (pct: number) => setRevealPct(pct);
 
         const onThreshold = () => {
-            const { audioVolume, lineArtFadeDuration, coloredFadeDuration, glitterEnabled, glitterDuration }
-                = useGameStore.getState().appConfig;
+            // 1. Update store → triggers glitter + phase change
+            onRevealThreshold();
 
-            // 1. Play audio
+            // 2. Dismiss glitter after duration
+            setTimeout(dismissGlitter, appConfig.glitterDuration + 300);
+
+            // 3. Play audio
             if (audioRef.current) {
-                audioRef.current.volume = audioVolume;
+                audioRef.current.volume = appConfig.audioVolume;
                 audioRef.current.play().catch(() => {});
             }
 
-            // 2. Un-mute + play video (already at frame 0)
+            // 4. Un-mute + play video
             const v = videoRef.current;
             if (v) {
                 v.muted = false;
@@ -124,79 +161,70 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
             }
 
-            // 3. Glitter
-            if (glitterEnabled) {
-                setShowGlitter(true);
-                setTimeout(() => setShowGlitter(false), glitterDuration + 300);
-            }
-
-            // 4. Start canvas CSS fade
-            const canvasFadeDelay = Math.max(0, lineArtFadeDuration * 0.4);
+            // 5. Schedule canvas CSS fade → then mark complete
+            const fadeDelay = Math.max(0, appConfig.lineArtFadeDuration * 0.4);
             canvasFadeTimer.current = setTimeout(() => {
-                setCanvasFading(true);
+                // Phase: FADING — canvas opacity animates via CSS
+                useGameStore.setState({ revealPhase: 'FADING' });
+
                 canvasFadeTimer.current = setTimeout(() => {
-                    setCanvasHidden(true); // CSS-only hide — canvas stays in DOM!
-                }, coloredFadeDuration + 100);
-            }, canvasFadeDelay);
+                    onRevealComplete();
+                }, appConfig.coloredFadeDuration + 100);
+            }, fadeDelay);
         };
 
         const onComplete = () => {
-            const { coloredFadeDuration } = useGameStore.getState().appConfig;
-            setTimeout(() => setCanvasHidden(true), coloredFadeDuration + 200);
+            setTimeout(onRevealComplete, appConfig.coloredFadeDuration + 200);
         };
 
-        EventBus.on('reveal-progress', onProgress);
-        EventBus.on('reveal-threshold', onThreshold);
-        EventBus.on('reveal-complete',  onComplete);
+        EventBus.on('reveal-progress',   onProgress);
+        EventBus.on('reveal-threshold',  onThreshold);
+        EventBus.on('reveal-complete',   onComplete);
+
+        // Rule 4: explicit EventBus teardown
         return () => {
-            EventBus.off('reveal-progress', onProgress);
+            EventBus.off('reveal-progress',  onProgress);
             EventBus.off('reveal-threshold', onThreshold);
             EventBus.off('reveal-complete',  onComplete);
         };
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [appConfig]); // re-subscribe if config changes
 
+    // ── Back button handler ───────────────────────────────────────────────
     const handleBack = useCallback(() => {
-        // ── Reset ALL transition state ────────────────────────────────
-        setRevealPct(0);
-        setCanvasFading(false);
-        setCanvasHidden(false);
-        setShowGlitter(false);
-        setShowBrushPicker(false);
-        setVideoReady(false);
+        // Rule 4: tear down all timers before state transition
         if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
 
-        // ── CRITICAL: reset prevSetIdRef so same set can be opened again ──
+        // Reset prevSetId so the same set can be opened again
         prevSetIdRef.current = null;
 
-        // ── Stop media ───────────────────────────────────────────────
+        // Stop media
         audioRef.current?.pause();
         if (audioRef.current) audioRef.current.currentTime = 0;
         const v = videoRef.current;
         if (v) { v.pause(); v.muted = true; v.currentTime = 0; v.src = ''; }
 
-        setGameState('GALLERY');
-    }, [setGameState]);
+        setShowBrushPicker(false);
+        setVideoReady(false);
 
-    const pct          = Math.round(revealPct * 100);
-    const thresholdPct = Math.round(appConfig.revealThreshold * 100);
-    const isPlaying    = gameState === 'PLAYING';
+        // Single store action resets all game/reveal state
+        endSession();
+    }, [endSession]);
 
     return (
         <div className="absolute inset-0 bg-white">
 
-            {/* ── Gallery ──────────────────────────────────────────── */}
-            {gameState === 'GALLERY' && <Gallery />}
+            {/* Gallery (shown when not playing) */}
+            {gamePhase === 'GALLERY' && <Gallery />}
 
-            {/* ── Audio (always in DOM) ────────────────────────────── */}
+            {/* Audio — always in DOM for stable ref */}
             <audio ref={audioRef} preload="none" />
 
-            {/* ── Video — z-10, BEHIND Phaser canvas ───────────────── */}
-            {/* Always in DOM during PLAYING so videoRef is stable.    */}
-            {/* CSS visibility hides it when not needed.               */}
+            {/* Video — z-10, BEHIND Phaser canvas */}
             <video
                 ref={videoRef}
                 className="absolute inset-0 z-10 w-full h-full object-contain bg-white"
-                style={{ visibility: isPlaying ? 'visible' : 'hidden' }}
+                style={{ visibility: (isPlaying || isComplete) ? 'visible' : 'hidden' }}
                 playsInline
                 loop
                 muted
@@ -208,23 +236,21 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 }}
             />
 
-            {/* ── Phaser game-container — z-20, NEVER unmounted ────── */}
-            {/* Removing this div from DOM destroys WebGL context permanently. */}
-            {/* Hide via CSS opacity + pointer-events instead.               */}
+            {/* Phaser game-container — z-20, NEVER unmounted (destroying it kills WebGL permanently) */}
             <div
                 id="game-container"
                 ref={gameContainerRef}
                 className="absolute inset-0 z-20 overflow-hidden bg-white w-full h-full"
                 style={{
-                    opacity:       !isPlaying || canvasHidden ? 0 : canvasFading ? 0 : 1,
-                    pointerEvents: !isPlaying || canvasFading || canvasHidden ? 'none' : 'auto',
-                    transition:    canvasFading
+                    opacity: (!isPlaying || canvasHidden) ? 0 : 1,
+                    pointerEvents: (!isPlaying || canvasFading || canvasHidden) ? 'none' : 'auto',
+                    transition: canvasFading
                         ? `opacity ${appConfig.coloredFadeDuration}ms ease-in-out`
                         : 'opacity 0ms',
                 }}
             />
 
-            {/* ── Glitter sweep — z-30, one-shot on threshold ──────── */}
+            {/* Glitter — z-30 */}
             {showGlitter && appConfig.glitterEnabled && (
                 <div
                     className="absolute inset-0 z-30 overflow-hidden pointer-events-none"
@@ -237,16 +263,15 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 </div>
             )}
 
-            {/* ── Back button — visible over video after reveal ─────── */}
-            {canvasHidden && isPlaying && (
+            {/* Back button after reveal (over video) */}
+            {canvasHidden && (isPlaying || isComplete) && (
                 <button
                     onClick={handleBack}
                     className="absolute top-4 right-4 z-50 w-9 h-9 rounded-full
                                bg-black/20 backdrop-blur-sm text-white
                                flex items-center justify-center
                                hover:bg-black/35 transition-all active:scale-90"
-                    aria-label="Back to gallery"
-                >
+                    aria-label="Back to gallery">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"
                          viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -255,7 +280,7 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 </button>
             )}
 
-            {/* ── Editor UI overlay — z-40, hides when canvas gone ─── */}
+            {/* Editor UI overlay — z-40 */}
             {isPlaying && !canvasHidden && (
                 <div className="absolute inset-0 z-40 pointer-events-none font-sans">
 
@@ -319,7 +344,7 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                              onClick={() => setShowBrushPicker(false)} aria-hidden="true" />
                     )}
 
-                    {/* Floating brush toggle — bottom right */}
+                    {/* Brush toggle — bottom right */}
                     <div className="absolute bottom-8 right-5 z-[20] pointer-events-auto flex flex-col items-end gap-3">
                         {showBrushPicker && (
                             <div className="bg-white/95 backdrop-blur-md shadow-2xl rounded-2xl

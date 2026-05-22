@@ -1,16 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-interface AppConfig {
-    revealThreshold: number;
-    brushMin: number; brushMax: number; brushDefault: number;
-    audioVolume: number;
-    lineArtFadeDuration: number;
-    coloredFadeDuration: number;
-    glitterEnabled: boolean;
-    glitterDuration: number;
-}
+import { useConfigStore } from '@/store/useConfigStore';
+import type { AppConfig } from '@/store/useConfigStore';
 
 interface ParamDef {
     key: keyof AppConfig;
@@ -127,6 +119,8 @@ export default function DevToolsPage() {
             const updated: AppConfig = await res.json();
             setSaved(updated);
             setDisplay(toDisplayConfig(updated));
+            // Keep global useConfigStore in sync — other components read from there
+            useConfigStore.getState().updateConfig(updated);
             setSaveStatus('ok');
         } catch {
             setSaveStatus('err');

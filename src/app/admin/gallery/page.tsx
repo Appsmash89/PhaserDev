@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useSetsStore } from '@/store/useSetsStore';
 
 interface ColorSet {
     id: string; name: string;
@@ -133,8 +134,7 @@ export default function GalleryManager() {
     const [deleting, setDeleting]   = useState<string|null>(null);
     const [expanded, setExpanded]   = useState<string|null>(null);
 
-    const fetchSets = () =>
-        fetch('/api/sets').then(r => r.json()).then(setSets).catch(console.error);
+    const fetchSets = () => useSetsStore.getState().refetchSets();
     useEffect(() => { fetchSets(); }, []);
 
     const setFile = (setter: React.Dispatch<React.SetStateAction<FileSlot>>, isImage: boolean) =>
@@ -163,8 +163,9 @@ export default function GalleryManager() {
 
     const handleDeleteSet = async (id: string) => {
         if (deleting === id + '_confirm') {
-            await fetch(`/api/sets/${id}`, { method: 'DELETE' });
-            setSets(prev => prev.filter(s => s.id !== id)); setDeleting(null);
+            await useSetsStore.getState().deleteSet(id);
+            setSets(prev => prev.filter(s => s.id !== id));
+            setDeleting(null);
         } else { setDeleting(id + '_confirm'); setTimeout(() => setDeleting(null), 3000); }
     };
 

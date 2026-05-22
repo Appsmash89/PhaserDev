@@ -1,33 +1,28 @@
 'use client';
 
+/**
+ * MonetizationModal — pure consumer of useEconomyStore.earn().
+ *
+ * Local state allowed (Rule 1 — purely visual/ephemeral):
+ *   - showAd: whether the 15-second ad overlay is visible
+ *
+ * All async logic delegated to useEconomyStore.earn().
+ * earnStatus from the store drives feedback UI (no local loading booleans).
+ */
+
 import { useState, useEffect, useRef } from 'react';
-import { getIdToken } from '@/lib/firebase/client';
-import { useEconomyStore } from '@/store/useEconomyStore';
+import { useEconomyStore }             from '@/store/useEconomyStore';
+import type { EarnActionType }         from '@/store/useEconomyStore';
 
-interface Offer {
-    label: string;
-    url: string;
-    credits: number;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Ad countdown overlay — purely presentational
+// ─────────────────────────────────────────────────────────────────────────────
 
-const PARTNER_OFFERS: Offer[] = [
-    { label: 'Explore Creative Tools', url: 'https://www.canva.com', credits: 10 },
-    { label: 'Discover Art Supplies',  url: 'https://www.amazon.in', credits: 10 },
-];
-
-interface Props {
-    open:    boolean;
-    onClose: () => void;
-    /** Set the user was trying to open */
-    lockedSetName?: string;
-    creditCost?: number;
-}
-
-// ── Rewarded Ad Countdown Overlay ────────────────────────────────────────────
 function AdOverlay({ onComplete }: { onComplete: () => void }) {
     const [remaining, setRemaining] = useState(15);
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+    // Rule 4: explicit interval teardown
     useEffect(() => {
         intervalRef.current = setInterval(() => {
             setRemaining(prev => {
@@ -40,14 +35,13 @@ function AdOverlay({ onComplete }: { onComplete: () => void }) {
             });
         }, 1000);
         return () => clearInterval(intervalRef.current!);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const pct = ((15 - remaining) / 15) * 100;
 
     return (
         <div className="fixed inset-0 z-[200] bg-black flex flex-col items-center justify-center gap-6 p-8">
-            {/* Simulated ad placeholder */}
             <div className="w-full max-w-sm aspect-video bg-zinc-800 rounded-2xl border border-zinc-700
                             flex items-center justify-center">
                 <div className="text-center">
@@ -55,8 +49,6 @@ function AdOverlay({ onComplete }: { onComplete: () => void }) {
                     <p className="text-zinc-700 text-xs mt-1">Your reward is loading…</p>
                 </div>
             </div>
-
-            {/* Progress bar */}
             <div className="w-full max-w-sm">
                 <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                     <div className="h-full bg-violet-500 rounded-full transition-all duration-1000 ease-linear"
@@ -70,46 +62,45 @@ function AdOverlay({ onComplete }: { onComplete: () => void }) {
     );
 }
 
-// ── Main Monetization Modal ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Partner offers config (static — server-side earn table is authoritative)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PARTNER_OFFERS: { label: string; url: string; actionType: EarnActionType; reward: number }[] = [
+    { label: 'Explore Creative Tools', url: 'https://www.canva.com', actionType: 'click_affiliate', reward: 10 },
+    { label: 'Discover Art Supplies',  url: 'https://www.amazon.in', actionType: 'click_affiliate', reward: 10 },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Props {
+    open:           boolean;
+    onClose:        () => void;
+    lockedSetName?: string;
+    creditCost?:    number;
+}
+
 export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: Props) {
-    const { credits } = useEconomyStore();
-    const [showAd, setShowAd]         = useState(false);
-    const [earning, setEarning]       = useState(false);
-    const [earnMsg, setEarnMsg]       = useState<string | null>(null);
+    const { credits, earn, earnStatus, earnError } = useEconomyStore();
+
+    // ── Local UI state (ephemeral, visual only) ──────────────────────────
+    const [showAd, setShowAd] = useState(false);
 
     if (!open) return null;
 
-    const callEarn = async (actionType: string, label: string) => {
-        setEarning(true);
-        try {
-            const token = await getIdToken();
-            const res   = await fetch('/api/economy/earn', {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body:    JSON.stringify({ actionType }),
-            });
-            const data = await res.json();
-            if (res.ok) {
-                setEarnMsg(`✅ ${label} — Credits added!`);
-                setTimeout(() => setEarnMsg(null), 2500);
-            } else {
-                setEarnMsg(`❌ ${data.error ?? 'Error'}`);
-            }
-        } catch {
-            setEarnMsg('❌ Network error');
-        } finally {
-            setEarning(false);
-        }
-    };
+    const isEarning  = earnStatus === 'loading';
+    const earnedOk   = earnStatus === 'success';
 
     const handleAdComplete = async () => {
         setShowAd(false);
-        await callEarn('watch_ad', '+50 Credits');
+        await earn('watch_ad');
     };
 
-    const handlePartnerOffer = async (offer: Offer) => {
+    const handlePartnerOffer = async (offer: typeof PARTNER_OFFERS[0]) => {
         window.open(offer.url, '_blank', 'noopener,noreferrer');
-        await callEarn('click_affiliate', `+${offer.credits} Credits`);
+        await earn(offer.actionType);
     };
 
     return (
@@ -117,7 +108,8 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
             {showAd && <AdOverlay onComplete={handleAdComplete} />}
 
             {/* Backdrop */}
-            <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm
+                            flex items-end sm:items-center justify-center p-4"
                  onClick={onClose}>
                 <div className="w-full max-w-sm bg-zinc-950 border border-white/10 rounded-3xl
                                 overflow-hidden shadow-2xl"
@@ -131,7 +123,8 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
                                 {lockedSetName && creditCost && (
                                     <p className="text-xs text-zinc-500 mt-0.5">
                                         <span className="text-amber-400 font-semibold">{creditCost} credits</span>
-                                        {' '}needed to unlock <span className="text-zinc-300">{lockedSetName}</span>
+                                        {' '}needed to unlock{' '}
+                                        <span className="text-zinc-300">{lockedSetName}</span>
                                     </p>
                                 )}
                             </div>
@@ -142,20 +135,26 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
                         </div>
                     </div>
 
-                    {/* Earn message */}
-                    {earnMsg && (
-                        <div className="mx-4 mt-3 py-2 px-3 bg-emerald-900/30 border border-emerald-700/30 rounded-xl
-                                        text-emerald-400 text-xs font-semibold text-center">
-                            {earnMsg}
+                    {/* Status feedback — driven by store state, not local */}
+                    {earnedOk && (
+                        <div className="mx-4 mt-3 py-2 px-3 bg-emerald-900/30 border border-emerald-700/30
+                                        rounded-xl text-emerald-400 text-xs font-semibold text-center">
+                            ✅ Credits added!
+                        </div>
+                    )}
+                    {earnStatus === 'error' && (
+                        <div className="mx-4 mt-3 py-2 px-3 bg-red-900/30 border border-red-700/30
+                                        rounded-xl text-red-400 text-xs text-center">
+                            ❌ {earnError ?? 'Something went wrong'}
                         </div>
                     )}
 
                     <div className="p-4 flex flex-col gap-3">
 
-                        {/* ── Watch Ad ─────────────────────────────── */}
+                        {/* Watch Ad */}
                         <button
                             onClick={() => setShowAd(true)}
-                            disabled={earning}
+                            disabled={isEarning}
                             className="w-full flex items-center gap-4 bg-violet-600/15 border border-violet-500/30
                                        rounded-2xl p-4 hover:bg-violet-600/25 transition-all active:scale-[0.98]
                                        disabled:opacity-50">
@@ -169,7 +168,7 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
                             <span className="text-violet-400 font-black text-sm">+50</span>
                         </button>
 
-                        {/* ── Partner Offers ────────────────────────── */}
+                        {/* Partner Offers */}
                         <div className="bg-zinc-900/60 border border-white/5 rounded-2xl p-3 flex flex-col gap-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 px-1">
                                 Partner Offers
@@ -177,7 +176,7 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
                             {PARTNER_OFFERS.map(offer => (
                                 <button key={offer.url}
                                         onClick={() => handlePartnerOffer(offer)}
-                                        disabled={earning}
+                                        disabled={isEarning}
                                         className="flex items-center gap-3 p-2.5 rounded-xl
                                                    hover:bg-white/5 transition-all active:scale-[0.98]
                                                    disabled:opacity-50 text-left">
@@ -186,14 +185,14 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
                                         <p className="text-sm font-semibold text-white">{offer.label}</p>
                                         <p className="text-[11px] text-zinc-500">Opens new tab</p>
                                     </div>
-                                    <span className="text-amber-400 font-black text-sm">+{offer.credits}</span>
+                                    <span className="text-amber-400 font-black text-sm">+{offer.reward}</span>
                                 </button>
                             ))}
                         </div>
 
-                        {/* ── Premium (placeholder) ─────────────────── */}
+                        {/* Premium IAP placeholder */}
                         <button className="w-full flex items-center gap-4 bg-amber-900/10 border border-amber-700/20
-                                           rounded-2xl p-4 opacity-75 cursor-not-allowed">
+                                           rounded-2xl p-4 opacity-75 cursor-not-allowed" disabled>
                             <div className="w-10 h-10 rounded-xl bg-amber-600/15 flex items-center justify-center text-xl flex-shrink-0">
                                 ⭐
                             </div>
@@ -205,7 +204,6 @@ export function MonetizationModal({ open, onClose, lockedSetName, creditCost }: 
                         </button>
                     </div>
 
-                    {/* Footer close */}
                     <div className="px-4 pb-5">
                         <button onClick={onClose}
                                 className="w-full py-3 text-zinc-500 text-sm font-semibold

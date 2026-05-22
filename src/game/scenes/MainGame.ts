@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { EventBus } from '../EventBus';
 import { useGameStore } from '../../store/useGameStore';
+import { useConfigStore } from '../../store/useConfigStore';
 
 export class MainGame extends Phaser.Scene {
 
@@ -72,7 +73,7 @@ export class MainGame extends Phaser.Scene {
 
     // ─────────────────────────────────────────────────────────────────────
     private loadSet(lineArtUrl: string, coloredArtUrl: string) {
-        useGameStore.getState().setIsAssetLoading(true);
+        useGameStore.getState()._setAssetLoading(true);
 
         const ts       = Date.now();
         const lineKey  = 'lineart_'  + ts;
@@ -105,12 +106,12 @@ export class MainGame extends Phaser.Scene {
             this.maskImage.setScale(1); // mask canvas is full canvas size
             this.maskImage.setPosition(W / 2, H / 2);
 
-            useGameStore.getState().setIsAssetLoading(false);
+            useGameStore.getState()._setAssetLoading(false);
         });
 
         this.load.once('loaderror', () => {
             console.error('Asset load failed');
-            useGameStore.getState().setIsAssetLoading(false);
+            useGameStore.getState()._setAssetLoading(false);
         });
 
         this.load.start();
@@ -185,9 +186,8 @@ export class MainGame extends Phaser.Scene {
     }
 
     private setupUIListeners() {
-        const store = useGameStore.getState();
         // Use config default for initial brush size
-        this.brushSize = store.appConfig.brushDefault;
+        this.brushSize = useConfigStore.getState().config.brushDefault;
         EventBus.on('ui-brush-size', (size: number) => { this.brushSize = size; });
     }
 
@@ -245,11 +245,11 @@ export class MainGame extends Phaser.Scene {
         this.revealPercent = Math.min(1, transparent / total);
         EventBus.emit('reveal-progress', this.revealPercent);
 
-        if (!this.triggered95 && this.revealPercent >= useGameStore.getState().appConfig.revealThreshold) {
+        if (!this.triggered95 && this.revealPercent >= useConfigStore.getState().config.revealThreshold) {
             this.triggered95 = true;
             EventBus.emit('reveal-threshold'); // React: start audio, prime video, glitter, canvas fade
 
-            const { lineArtFadeDuration } = useGameStore.getState().appConfig;
+            const { lineArtFadeDuration } = useConfigStore.getState().config;
             if (lineArtFadeDuration > 0) {
                 this.tweens.add({
                     targets:  this.maskImage,

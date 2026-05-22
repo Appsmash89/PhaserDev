@@ -1,12 +1,6 @@
 /**
  * useSetsStore — SSOT for the coloring sets catalog.
- *
- * Gallery, any future "featured sets" UI, and admin components all read
- * from this single store. No component fetches independently.
- *
- * Rule 3: full idle/loading/success/error lifecycle.
- * Rule 4: deleteSet() provides blast-radius logic — also clears selectedSet
- *         in useGameStore if the deleted set is currently active.
+ * genres: derived from the sets list, no separate fetch needed.
  */
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
@@ -18,23 +12,26 @@ interface SetsState {
     sets:        ColorSet[];
     fetchStatus: FetchStatus;
     fetchError:  string | null;
+    /** Derived: unique genre list (with "All" prepended). */
+    genres:      string[];
 
-    /** Fetch all sets. Idempotent — won't re-fetch if already loaded. */
     fetchSets:   () => Promise<void>;
-
-    /** Force re-fetch (call after upload or delete). */
     refetchSets: () => Promise<void>;
-
-    /**
-     * Remove a set by ID. Also nullifies selectedSet in useGameStore
-     * if the deleted set is currently active (blast-radius Rule 4).
-     */
+    /** Remove a set. Also ends the game session if the set is currently active. */
     deleteSet:   (id: string) => Promise<void>;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Store
-// ─────────────────────────────────────────────────────────────────────────────
+function deriveGenres(sets: ColorSet[]): string[] {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const s of sets) {
+        if (s.genre && !seen.has(s.genre)) {
+            seen.add(s.genre);
+            list.push(s.genre);
+        }
+    }
+    return ['All', ...list.sort()];
+}
 
 export const useSetsStore = create<SetsState>()(
     devtools(
@@ -42,6 +39,7 @@ export const useSetsStore = create<SetsState>()(
             sets:        [],
             fetchStatus: 'idle',
             fetchError:  null,
+            genres:      ['All'],
 
             fetchSets: async () => {
                 if (get().fetchStatus === 'success' || get().fetchStatus === 'loading') return;
@@ -51,39 +49,38 @@ export const useSetsStore = create<SetsState>()(
             refetchSets: async () => {
                 set({ fetchStatus: 'loading', fetchError: null }, false, 'refetchSets/loading');
                 try {
-                    const res = await fetch('/api/sets');
+                    const res  = await fetch('/api/sets');
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data: ColorSet[] = await res.json();
-                    set({ sets: data, fetchStatus: 'success' }, false, 'refetchSets/success');
+                    set({
+                        sets: data,
+                        genres: deriveGenres(data),
+                        fetchStatus: 'success',
+                    }, false, 'refetchSets/success');
                 } catch (e) {
-                    set(
-                        { fetchStatus: 'error', fetchError: String(e) },
-                        false,
-                        'refetchSets/error'
-                    );
+                    set({ fetchStatus: 'error', fetchError: String(e) }, false, 'refetchSets/error');
                 }
             },
 
             deleteSet: async (id) => {
-                // Optimistic removal
                 set(
-                    (s) => ({ sets: s.sets.filter((set) => set.id !== id) }),
+                    (s) => {
+                        const sets = s.sets.filter(set => set.id !== id);
+                        return { sets, genres: deriveGenres(sets) };
+                    },
                     false,
                     'deleteSet/optimistic'
                 );
 
-                // Blast-radius: if the deleted set is currently playing, end the session
                 const { useGameStore } = await import('./useGameStore');
-                const gameState = useGameStore.getState();
-                if (gameState.selectedSet?.id === id) {
-                    gameState.endSession();
+                if (useGameStore.getState().selectedSet?.id === id) {
+                    useGameStore.getState().endSession();
                 }
 
                 try {
                     const res = await fetch(`/api/sets/${id}`, { method: 'DELETE' });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 } catch {
-                    // Rollback optimistic removal on failure
                     get().refetchSets();
                 }
             },

@@ -96,6 +96,21 @@ export class MainGame extends Phaser.Scene {
             this.fitImage(this.coloredImage, W, H);
             this.coloredImage.setAlpha(1);
 
+            // ── Compute display rect (% of canvas) → used by React to ──────
+            // align the video element pixel-perfectly with this image.
+            {
+                const dw = this.coloredImage.displayWidth;
+                const dh = this.coloredImage.displayHeight;
+                const cx = this.coloredImage.x;
+                const cy = this.coloredImage.y;
+                useGameStore.getState().setImageDisplayRect({
+                    xPct: (cx - dw / 2) / W,
+                    yPct: (cy - dh / 2) / H,
+                    wPct: dw / W,
+                    hPct: dh / H,
+                });
+            }
+
             // Paint line art onto mask canvas (full opacity)
             this.paintLineArtToCanvas(lineKey, W, H);
 

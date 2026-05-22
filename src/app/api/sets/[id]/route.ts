@@ -56,21 +56,33 @@ export async function PATCH(
     const contentType = request.headers.get('content-type') ?? '';
     const setDir = path.join(SETS_DIR, id);
 
-    // ── JSON body: { assetType } means delete that asset ──────────────────
+    // ── JSON body: { assetType } = delete that asset
+    //              { field, value } = update a metadata field ─────────────
     if (contentType.includes('application/json')) {
-        const { assetType } = await request.json() as { assetType: string };
-        const urlKey = assetTypeToKey(assetType);
+        const body = await request.json() as { assetType?: string; field?: string; value?: unknown };
+
+        // Metadata update (genre, videoMuted, name, creditCost)
+        if (body.field) {
+            const ALLOWED_FIELDS = ['genre', 'videoMuted', 'name', 'creditCost'] as const;
+            type AllowedField = typeof ALLOWED_FIELDS[number];
+            if (!ALLOWED_FIELDS.includes(body.field as AllowedField)) {
+                return NextResponse.json({ error: 'Invalid field' }, { status: 400 });
+            }
+            (set as unknown as Record<string, unknown>)[body.field] = body.value;
+            writeDB(sets);
+            return NextResponse.json(set);
+        }
+
+        // Asset deletion: { assetType }
+        const urlKey = assetTypeToKey(body.assetType ?? '');
         if (!urlKey) return NextResponse.json({ error: 'Invalid assetType' }, { status: 400 });
 
-        // Delete the file
-        const currentUrl: string = (set as any)[urlKey] ?? '';
+        const currentUrl: string = (set as unknown as Record<string, unknown>)[urlKey as string] as string ?? '';
         if (currentUrl) {
             const filePath = path.join(process.cwd(), 'public', currentUrl);
             try { fs.unlinkSync(filePath); } catch { /* ignore */ }
         }
-
-        // Null the field in DB
-        (set as any)[urlKey] = null;
+        (set as unknown as Record<string, unknown>)[urlKey as string] = null;
         writeDB(sets);
         return NextResponse.json(set);
     }

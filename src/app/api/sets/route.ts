@@ -13,7 +13,9 @@ export interface ColorSet {
     audioUrl: string | null;
     videoUrl: string | null;
     createdAt: string;
-    creditCost: number; // 0 = free
+    creditCost: number;
+    genre:      string;  // e.g. "Portraits" | "Fantasy" | "Nature"
+    videoMuted: boolean; // admin-controlled; true = video plays muted after reveal
 }
 
 function readDB(): ColorSet[] {
@@ -49,8 +51,10 @@ export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData();
 
-        const name       = (formData.get('name') as string) || 'Untitled';
+        const name       = (formData.get('name')       as string) || 'Untitled';
         const creditCost = parseInt((formData.get('creditCost') as string) ?? '0', 10) || 0;
+        const genre      = (formData.get('genre')       as string) || 'General';
+        const videoMuted = (formData.get('videoMuted')  as string) === 'true';
         const lineArt    = formData.get('lineArt')    as File | null;
         const coloredArt = formData.get('coloredArt') as File | null;
         const audio      = formData.get('audio')      as File | null;
@@ -82,6 +86,8 @@ export async function POST(request: NextRequest) {
             videoUrl:      `/uploads/sets/${id}/${videoFile}`,
             createdAt:     new Date().toISOString(),
             creditCost,
+            genre,
+            videoMuted,
         };
 
         const sets = readDB();

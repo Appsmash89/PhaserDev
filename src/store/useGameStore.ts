@@ -1,12 +1,5 @@
 /**
  * useGameStore — SSOT for all game session & reveal state.
- *
- * Domains: game flow, selected set, reveal sequence, brush size, asset loading.
- * Does NOT contain: economy data (→ useEconomyStore), admin config (→ useConfigStore),
- *                   sets catalog (→ useSetsStore).
- *
- * All state transitions happen through named actions. No external component
- * may mutate state directly.
  */
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
@@ -15,7 +8,7 @@ import { devtools } from 'zustand/middleware';
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type GamePhase = 'GALLERY' | 'PLAYING' | 'COMPLETE';
+export type GamePhase = 'WELCOME' | 'GALLERY' | 'PLAYING' | 'COMPLETE';
 
 export interface ColorSet {
     id:            string;
@@ -25,62 +18,71 @@ export interface ColorSet {
     audioUrl:      string | null;
     videoUrl:      string | null;
     createdAt:     string;
-    creditCost:    number; // 0 = free
+    creditCost:    number;
+    genre:         string;    // "Portraits" | "Nature" | "Fantasy" | "Animals" | "Abstract"
+    videoMuted:    boolean;   // admin-controlled; true = video stays muted after reveal
 }
 
-/** Reveal phase within a single coloring session. */
 export type RevealPhase =
-    | 'IDLE'        // not started
-    | 'PAINTING'    // user is brushing
-    | 'THRESHOLD'   // threshold hit, sequence starting
-    | 'FADING'      // canvas CSS fade in progress
-    | 'COMPLETE';   // video is visible, session done
+    | 'IDLE'
+    | 'PAINTING'
+    | 'THRESHOLD'
+    | 'FADING'
+    | 'COMPLETE';
+
+/**
+ * Percentage-based rect: resolution-independent position of the colored image
+ * within the Phaser canvas. Used to align the video element pixel-perfectly.
+ */
+export interface ImageDisplayRect {
+    xPct: number; // left edge as fraction of canvas width  (0–1)
+    yPct: number; // top  edge as fraction of canvas height (0–1)
+    wPct: number; // width       as fraction of canvas width
+    hPct: number; // height      as fraction of canvas height
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// State + Actions interface
+// State + Actions
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface GameState {
-    // ── Game flow ────────────────────────────────────────────────────────
-    gamePhase:       GamePhase;
-    selectedSet:     ColorSet | null;
+    // ── App flow ─────────────────────────────────────────────────────────
+    gamePhase:        GamePhase;
+    activeTab:        'gallery' | 'wallet';
 
-    // ── Asset loading ────────────────────────────────────────────────────
-    isAssetLoading:  boolean;
+    // ── Session ──────────────────────────────────────────────────────────
+    selectedSet:      ColorSet | null;
+    isAssetLoading:   boolean;
+    brushSize:        number;
 
-    // ── Brush ────────────────────────────────────────────────────────────
-    brushSize:       number;
+    // ── Reveal ───────────────────────────────────────────────────────────
+    revealPhase:      RevealPhase;
+    revealPct:        number;
+    showGlitter:      boolean;
+    imageDisplayRect: ImageDisplayRect | null;
 
-    // ── Reveal sequence ──────────────────────────────────────────────────
-    revealPhase:     RevealPhase;
-    revealPct:       number;   // 0.0–1.0, updated by Phaser every 300ms
-    showGlitter:     boolean;
+    // ── Progression ──────────────────────────────────────────────────────
+    completedSetIds:  string[];
 
     // ── Actions ──────────────────────────────────────────────────────────
-    /** Navigate to playing state with a chosen set. */
-    startSession:    (set: ColorSet) => void;
+    /** WELCOME → GALLERY */
+    dismissWelcome:   () => void;
+    /** Switch between Discover / Credits tab */
+    setActiveTab:     (tab: 'gallery' | 'wallet') => void;
+    /** Begin coloring a set */
+    startSession:     (set: ColorSet) => void;
+    /** Return to gallery; resets all session state */
+    endSession:       () => void;
 
-    /** Go back to gallery. Resets the entire session. */
-    endSession:      () => void;
+    setRevealPct:       (pct: number)                  => void;
+    onRevealThreshold:  ()                             => void;
+    onRevealComplete:   ()                             => void;
+    dismissGlitter:     ()                             => void;
+    setImageDisplayRect:(rect: ImageDisplayRect | null) => void;
 
-    /** Update progress from Phaser's EventBus handler. */
-    setRevealPct:    (pct: number) => void;
-
-    /** Called when Phaser fires reveal-threshold. */
-    onRevealThreshold: () => void;
-
-    /** Called when the canvas CSS fade completes — video is now visible. */
-    onRevealComplete:  () => void;
-
-    /** Dismiss glitter after animation duration. */
-    dismissGlitter:  () => void;
-
-    // ── Internal Phaser bridge (called only from PhaserGame) ─────────────
-    /** @internal Phaser loader sets this. Not for use in UI components. */
+    /** @internal called only by Phaser (MainGame) */
     _setAssetLoading: (v: boolean) => void;
-
-    /** @internal Set brush size. */
-    setBrushSize:    (size: number) => void;
+    setBrushSize:     (size: number) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,49 +91,70 @@ interface GameState {
 
 export const useGameStore = create<GameState>()(
     devtools(
-        (set) => ({
-            gamePhase:      'GALLERY',
-            selectedSet:    null,
-            isAssetLoading: false,
-            brushSize:      40,
-            revealPhase:    'IDLE',
-            revealPct:      0,
-            showGlitter:    false,
+        (set, get) => ({
+            gamePhase:        'WELCOME',
+            activeTab:        'gallery',
+            selectedSet:      null,
+            isAssetLoading:   false,
+            brushSize:        40,
+            revealPhase:      'IDLE',
+            revealPct:        0,
+            showGlitter:      false,
+            imageDisplayRect: null,
+            completedSetIds:  [],
+
+            dismissWelcome: () =>
+                set({ gamePhase: 'GALLERY' }, false, 'dismissWelcome'),
+
+            setActiveTab: (activeTab) =>
+                set({ activeTab }, false, 'setActiveTab'),
 
             startSession: (selectedSet) => set({
-                gamePhase:    'PLAYING',
+                gamePhase:        'PLAYING',
                 selectedSet,
-                revealPhase:  'PAINTING',
-                revealPct:    0,
-                showGlitter:  false,
+                revealPhase:      'PAINTING',
+                revealPct:        0,
+                showGlitter:      false,
+                imageDisplayRect: null,
             }, false, 'startSession'),
 
             endSession: () => set({
-                gamePhase:    'GALLERY',
-                revealPhase:  'IDLE',
-                revealPct:    0,
-                showGlitter:  false,
-                isAssetLoading: false,
+                gamePhase:        'GALLERY',
+                revealPhase:      'IDLE',
+                revealPct:        0,
+                showGlitter:      false,
+                isAssetLoading:   false,
+                imageDisplayRect: null,
             }, false, 'endSession'),
 
-            setRevealPct: (revealPct) => set({ revealPct }, false, 'setRevealPct'),
+            setRevealPct: (revealPct) =>
+                set({ revealPct }, false, 'setRevealPct'),
 
-            onRevealThreshold: () => set({
-                revealPhase: 'THRESHOLD',
-                showGlitter: true,
-            }, false, 'onRevealThreshold'),
+            onRevealThreshold: () =>
+                set({ revealPhase: 'THRESHOLD', showGlitter: true }, false, 'onRevealThreshold'),
 
-            onRevealComplete: () => set({
-                gamePhase:   'COMPLETE',
-                revealPhase: 'COMPLETE',
-            }, false, 'onRevealComplete'),
+            onRevealComplete: () => {
+                const { selectedSet, completedSetIds } = get();
+                set({
+                    gamePhase:   'COMPLETE',
+                    revealPhase: 'COMPLETE',
+                    completedSetIds: selectedSet
+                        ? [...new Set([...completedSetIds, selectedSet.id])]
+                        : completedSetIds,
+                }, false, 'onRevealComplete');
+            },
 
-            dismissGlitter: () => set({ showGlitter: false }, false, 'dismissGlitter'),
+            dismissGlitter: () =>
+                set({ showGlitter: false }, false, 'dismissGlitter'),
+
+            setImageDisplayRect: (imageDisplayRect) =>
+                set({ imageDisplayRect }, false, 'setImageDisplayRect'),
 
             _setAssetLoading: (isAssetLoading) =>
                 set({ isAssetLoading }, false, '_setAssetLoading'),
 
-            setBrushSize: (brushSize) => set({ brushSize }, false, 'setBrushSize'),
+            setBrushSize: (brushSize) =>
+                set({ brushSize }, false, 'setBrushSize'),
         }),
         { name: 'GameStore' }
     )

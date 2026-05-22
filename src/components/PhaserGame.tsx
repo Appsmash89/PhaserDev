@@ -153,10 +153,16 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
 
             const fadeDelay = Math.max(0, appConfig.lineArtFadeDuration * 0.4);
             canvasFadeTimer.current = setTimeout(() => {
+                // Guard: if the user went back before this timer fired, bail.
+                // revealPhase will be 'IDLE' (endSession) or 'PAINTING' (new session).
+                if (useGameStore.getState().revealPhase !== 'THRESHOLD') return;
                 useGameStore.setState({ revealPhase: 'FADING' });
                 canvasFadeTimer.current = setTimeout(() => {
                     onRevealComplete();
-                    showToast('Reveal complete! 🎉', 'success');
+                    // Only show toast if we actually transitioned to COMPLETE
+                    if (useGameStore.getState().gamePhase === 'COMPLETE') {
+                        showToast('Reveal complete! 🎉', 'success');
+                    }
                 }, appConfig.coloredFadeDuration + 100);
             }, fadeDelay);
         };

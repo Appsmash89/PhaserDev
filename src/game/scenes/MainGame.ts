@@ -33,6 +33,19 @@ export class MainGame extends Phaser.Scene {
 
     // ─────────────────────────────────────────────────────────────────────
     create() {
+        // ── CRITICAL: Reset all per-session state ─────────────────────────
+        // Phaser restarts scenes by calling create() on the SAME class instance.
+        // The constructor is NEVER called again, so class-property defaults
+        // (e.g. `triggered95 = false`) are NOT restored automatically.
+        // Every field that affects painting or reveal must be explicitly reset here.
+        this.triggered95       = false;
+        this.revealPercent     = 0;
+        this.lastProgressCheck = 0;
+        this.isDrawing         = false;
+        this.lastPt            = null;
+        this.artBounds         = { x: 0, y: 0, w: 0, h: 0 };
+        // ─────────────────────────────────────────────────────────────────
+
         EventBus.emit('current-scene-ready', this);
 
         const W = this.cameras.main.width;

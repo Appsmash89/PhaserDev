@@ -130,11 +130,21 @@ export const useGameStore = create<GameState>()(
             setRevealPct: (revealPct) =>
                 set({ revealPct }, false, 'setRevealPct'),
 
-            onRevealThreshold: () =>
-                set({ revealPhase: 'THRESHOLD', showGlitter: true }, false, 'onRevealThreshold'),
+            onRevealThreshold: () => {
+                // Guard: only fire if we're actively in a painting session.
+                // A stale EventBus emission from a previous scene must not corrupt
+                // the current session's phase.
+                if (get().gamePhase !== 'PLAYING' || get().revealPhase !== 'PAINTING') return;
+                set({ revealPhase: 'THRESHOLD', showGlitter: true }, false, 'onRevealThreshold');
+            },
 
             onRevealComplete: () => {
-                const { selectedSet, completedSetIds } = get();
+                const { gamePhase, revealPhase, selectedSet, completedSetIds } = get();
+                // Guard: only fire if reveal is still in progress for THIS session.
+                // Stale timers from a previous session must not set gamePhase='COMPLETE'
+                // while the user is painting a new set.
+                if (gamePhase !== 'PLAYING') return;
+                if (revealPhase !== 'THRESHOLD' && revealPhase !== 'FADING') return;
                 set({
                     gamePhase:   'COMPLETE',
                     revealPhase: 'COMPLETE',

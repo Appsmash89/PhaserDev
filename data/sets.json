@@ -8,7 +8,7 @@
     "videoUrl": "/uploads/sets/1778484083054/video.mp4",
     "createdAt": "2026-05-11T07:21:23.070Z",
     "creditCost": 0,
-    "genre": "Portraits",
+    "genre": "Fantasy",
     "videoMuted": false
   },
   {
@@ -21,6 +21,18 @@
     "createdAt": "2026-05-18T08:17:21.191Z",
     "creditCost": 0,
     "genre": "Portraits",
+    "videoMuted": false
+  },
+  {
+    "id": "1779483072684",
+    "name": "Nature1",
+    "lineArtUrl": "/uploads/sets/1779483072684/lineart.jpg",
+    "coloredArtUrl": "/uploads/sets/1779483072684/colored.jpg",
+    "audioUrl": "/uploads/sets/1779483072684/audio.mp3",
+    "videoUrl": "/uploads/sets/1779483072684/video.mp4",
+    "createdAt": "2026-05-22T20:51:12.693Z",
+    "creditCost": 10,
+    "genre": "Nature",
     "videoMuted": false
   }
 ]

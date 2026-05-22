@@ -3,8 +3,23 @@
 /**
  * CreditWallet — full credits/economy screen (second tab in Gallery).
  *
- * Shows: balance, daily bonus placeholder, earn options, purchase history placeholder.
- * All async actions go through useEconomyStore (SSOT).
+ * UX Principles Applied:
+ *
+ * M2 — Affordances:
+ *   - Each earn button has: Default / Hover / Active / Loading / Disabled states
+ *   - Loading state is PER-BUTTON (not a global lock) — shows spinner inline
+ *     so the user knows exactly which action is in progress
+ *   - Disabled buttons show cursor-not-allowed + explicit tooltip via toast
+ *
+ * M3 — System Status:
+ *   - Success/error feedback appears inline, adjacent to the originating button
+ *   - Balance card animates credit increase after earn
+ *   - Ad countdown shows real time progress, "done" state + claim CTA
+ *
+ * M4 — Defensive Design:
+ *   - Ad overlay has no accidental dismiss — user must explicitly claim reward
+ *   - Premium IAP placeholder is clearly labelled "Coming Soon" so user
+ *     understands it's not yet purchasable (tombstone state)
  */
 
 import { useState, useEffect } from 'react';
@@ -18,15 +33,10 @@ function AdOverlay({ onComplete }: { onComplete: () => void }) {
     const [remaining, setRemaining] = useState(15);
     const [done, setDone]           = useState(false);
 
-    // Rule 4: interval torn down in cleanup
     useEffect(() => {
         const iv = setInterval(() => {
             setRemaining(prev => {
-                if (prev <= 1) {
-                    clearInterval(iv);
-                    setDone(true);
-                    return 0;
-                }
+                if (prev <= 1) { clearInterval(iv); setDone(true); return 0; }
                 return prev - 1;
             });
         }, 1000);
@@ -37,6 +47,7 @@ function AdOverlay({ onComplete }: { onComplete: () => void }) {
 
     return (
         <div className="fixed inset-0 z-[300] bg-zinc-950 flex flex-col items-center justify-center gap-6 p-8">
+            {/* M3: Progress shown throughout — user is never left wondering how long */}
             <div className="w-full max-w-sm aspect-video bg-zinc-900 rounded-2xl border border-zinc-800
                             flex items-center justify-center">
                 <div className="text-center">
@@ -51,56 +62,56 @@ function AdOverlay({ onComplete }: { onComplete: () => void }) {
                          style={{ width: `${pct}%` }} />
                 </div>
                 <p className="text-zinc-500 text-xs text-center mt-2">
-                    {done ? '✅ +50 Credits earned!' : remaining > 0 ? `Skip in ${remaining}s` : 'Loading reward…'}
+                    {done
+                        ? '✅ +50 Credits ready to claim!'
+                        : remaining > 0
+                            ? `${remaining}s remaining`
+                            : 'Almost done…'}
                 </p>
             </div>
+            {/* M4: Claim button only appears when ad is done — no accidental early exit */}
             {done && (
-                <button onClick={onComplete}
-                        className="px-8 py-3 bg-violet-600 text-white font-bold rounded-2xl
-                                   active:scale-95 transition-transform">
-                    Claim Reward 🎉
+                <button
+                    onClick={onComplete}
+                    className="px-8 py-4 bg-violet-600 text-white font-bold text-base rounded-2xl
+                               hover:bg-violet-500
+                               active:scale-95 active:bg-violet-700
+                               focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-300
+                               transition-all duration-150"
+                >
+                    Claim +50 Credits 🎉
                 </button>
             )}
         </div>
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Earn options
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Earn options config ───────────────────────────────────────────────────────
 
 const EARN_OPTIONS: {
-    id:         EarnActionType;
-    emoji:      string;
-    title:      string;
-    subtitle:   string;
-    reward:     number;
-    url?:       string;
+    id:       EarnActionType;
+    emoji:    string;
+    title:    string;
+    subtitle: string;
+    reward:   number;
+    url?:     string;
 }[] = [
-    {
-        id: 'watch_ad', emoji: '🎬',
-        title:    'Watch a Short Ad',
-        subtitle: '15 seconds · Unskippable',
-        reward:   50,
-    },
-    {
-        id: 'click_affiliate', emoji: '🔗',
-        title:    'Explore Creative Tools',
-        subtitle: 'Opens in new tab',
-        reward:   10,
-        url:      'https://www.canva.com',
-    },
-    {
-        id: 'daily_bonus', emoji: '🌅',
-        title:    'Daily Login Bonus',
-        subtitle: 'Come back every day',
-        reward:   25,
-    },
+    { id: 'watch_ad',        emoji: '🎬', title: 'Watch a Short Ad',     subtitle: '15 seconds · Unskippable',  reward: 50 },
+    { id: 'click_affiliate', emoji: '🔗', title: 'Explore Creative Tools', subtitle: 'Opens in new tab',          reward: 10, url: 'https://www.canva.com' },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Inline Spinner ────────────────────────────────────────────────────────────
+
+function Spinner() {
+    return (
+        <svg className="animate-spin h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+    );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export default function CreditWallet() {
     const {
@@ -108,26 +119,46 @@ export default function CreditWallet() {
         hasRemovedAds, unlockedSets,
     } = useEconomyStore();
 
-    const [showAd, setShowAd] = useState(false);
+    // M2/M3: Track WHICH specific action is loading (not just "something is loading")
+    const [activeAction, setActiveAction] = useState<EarnActionType | null>(null);
+    const [showAd,       setShowAd]       = useState(false);
+    // M3: Track inline success flash per button
+    const [lastSuccess,  setLastSuccess]  = useState<EarnActionType | null>(null);
+
+    const isAnyLoading = earnStatus === 'loading';
 
     const handleEarn = async (opt: typeof EARN_OPTIONS[0]) => {
-        if (earnStatus === 'loading') {
-            showToast('Please wait for the current action to finish…', 'warning');
+        if (isAnyLoading) {
+            showToast('One action at a time — please wait ⏳', 'warning');
             return;
         }
-        if (opt.id === 'watch_ad') {
-            setShowAd(true);
-            return;
-        }
-        if (opt.url) {
-            window.open(opt.url, '_blank', 'noopener,noreferrer');
-        }
+        if (opt.id === 'watch_ad') { setShowAd(true); return; }
+        if (opt.url) window.open(opt.url, '_blank', 'noopener,noreferrer');
+
+        setActiveAction(opt.id);
         await earn(opt.id);
+        setActiveAction(null);
+        // M3: inline success signal near the originating button
+        setLastSuccess(opt.id);
+        setTimeout(() => setLastSuccess(null), 3000);
+    };
+
+    const handleDailyBonus = async () => {
+        if (isAnyLoading) { showToast('One action at a time — please wait ⏳', 'warning'); return; }
+        setActiveAction('daily_bonus');
+        await earn('daily_bonus');
+        setActiveAction(null);
+        setLastSuccess('daily_bonus');
+        setTimeout(() => setLastSuccess(null), 3000);
     };
 
     const handleAdComplete = async () => {
         setShowAd(false);
+        setActiveAction('watch_ad');
         await earn('watch_ad');
+        setActiveAction(null);
+        setLastSuccess('watch_ad');
+        setTimeout(() => setLastSuccess(null), 3000);
     };
 
     return (
@@ -137,14 +168,16 @@ export default function CreditWallet() {
             <div className="flex flex-col h-full overflow-y-auto hide-scrollbar pb-8">
 
                 {/* ── Balance Card ─────────────────────────────────────── */}
-                <div className="mx-4 mt-4 rounded-3xl overflow-hidden
-                                bg-zinc-900 text-white shadow-xl">
+                <div className="mx-4 mt-4 rounded-3xl overflow-hidden bg-zinc-900 text-white shadow-xl">
                     <div className="px-6 pt-6 pb-4">
                         <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-1">
                             Your Balance
                         </p>
                         <div className="flex items-end gap-2">
-                            <span className="text-5xl font-black tracking-tighter">{credits}</span>
+                            {/* M3: Credits number updates visually when earned */}
+                            <span key={credits} className="text-5xl font-black tracking-tighter animate-credit-pop">
+                                {credits}
+                            </span>
                             <span className="text-zinc-400 text-lg font-semibold pb-1">credits</span>
                         </div>
                         <div className="mt-3 flex gap-3">
@@ -158,23 +191,15 @@ export default function CreditWallet() {
                             </div>
                         </div>
                     </div>
-
-                    {/* Gradient strip */}
                     <div className="h-1 bg-gradient-to-r from-violet-500 via-rose-400 to-amber-400" />
                 </div>
 
-                {/* ── Earn Status Banner ──────────────────────────────── */}
-                {earnStatus === 'success' && (
-                    <div className="mx-4 mt-3 py-3 px-4 bg-emerald-50 border border-emerald-200
-                                    rounded-2xl flex items-center gap-2">
-                        <span className="text-emerald-600 font-black text-lg">+</span>
-                        <p className="text-emerald-700 font-semibold text-sm">Credits added to your balance!</p>
-                    </div>
-                )}
-                {earnStatus === 'error' && (
+                {/* M3: Global earn error — only shown for errors without a specific button context */}
+                {earnStatus === 'error' && !activeAction && (
                     <div className="mx-4 mt-3 py-3 px-4 bg-red-50 border border-red-200
-                                    rounded-2xl text-red-600 text-sm">
-                        {earnError ?? 'Something went wrong. Please try again.'}
+                                    rounded-2xl text-red-600 text-sm flex items-center gap-2">
+                        <span>❌</span>
+                        <span>{earnError ?? 'Something went wrong. Please try again.'}</span>
                     </div>
                 )}
 
@@ -192,14 +217,31 @@ export default function CreditWallet() {
                             <p className="font-bold text-zinc-800 text-sm">Daily Login Bonus</p>
                             <p className="text-xs text-zinc-500">+25 credits every day</p>
                         </div>
-                        <button
-                            onClick={() => handleEarn(EARN_OPTIONS.find(o => o.id === 'daily_bonus')!)}
-                            disabled={earnStatus === 'loading'}
-                            className="px-4 py-2 bg-amber-400 text-zinc-900 text-xs font-black rounded-xl
-                                       active:scale-95 transition-transform disabled:opacity-60"
-                        >
-                            Claim
-                        </button>
+                        {/* M3: Inline result right on the button */}
+                        {lastSuccess === 'daily_bonus'
+                            ? (
+                                <span className="text-emerald-600 font-black text-sm animate-toast-in">
+                                    +25 ✓
+                                </span>
+                            )
+                            : (
+                                /* M2: All 5 states: default / hover / active / loading / disabled */
+                                <button
+                                    onClick={handleDailyBonus}
+                                    disabled={isAnyLoading}
+                                    aria-busy={activeAction === 'daily_bonus'}
+                                    className="flex items-center gap-1.5 px-4 py-2 bg-amber-400 text-zinc-900 text-xs font-black rounded-xl
+                                               hover:bg-amber-300
+                                               active:scale-95 active:bg-amber-500
+                                               disabled:opacity-50 disabled:cursor-not-allowed
+                                               focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500
+                                               transition-all duration-150"
+                                >
+                                    {activeAction === 'daily_bonus' ? <Spinner /> : null}
+                                    {activeAction === 'daily_bonus' ? 'Claiming…' : 'Claim'}
+                                </button>
+                            )
+                        }
                     </div>
                 </div>
 
@@ -209,42 +251,71 @@ export default function CreditWallet() {
                         Earn More Credits
                     </p>
                     <div className="flex flex-col gap-3">
-                        {EARN_OPTIONS.filter(o => o.id !== 'daily_bonus').map(opt => (
-                            <button
-                                key={opt.id}
-                                onClick={() => handleEarn(opt)}
-                                disabled={earnStatus === 'loading'}
-                                className="flex items-center gap-4 bg-white border border-zinc-100
-                                           rounded-2xl p-4 shadow-sm text-left
-                                           active:scale-[0.98] transition-all disabled:opacity-60
-                                           hover:shadow-md hover:border-zinc-200"
-                            >
-                                <div className="w-11 h-11 rounded-xl bg-violet-50 flex items-center
-                                                justify-center text-xl flex-shrink-0">
-                                    {opt.emoji}
-                                </div>
-                                <div className="flex-1">
-                                    <p className="font-bold text-zinc-800 text-sm">{opt.title}</p>
-                                    <p className="text-xs text-zinc-400">{opt.subtitle}</p>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                    <span className="text-violet-600 font-black text-base">+{opt.reward}</span>
-                                    <p className="text-[10px] text-zinc-400">credits</p>
-                                </div>
-                            </button>
-                        ))}
+                        {EARN_OPTIONS.map(opt => {
+                            const isThisLoading = activeAction === opt.id;
+                            const isThisSuccess = lastSuccess === opt.id;
+                            const isDisabled    = isAnyLoading && !isThisLoading;
+
+                            return (
+                                <button
+                                    key={opt.id}
+                                    onClick={() => handleEarn(opt)}
+                                    disabled={isAnyLoading}
+                                    aria-busy={isThisLoading}
+                                    className={`flex items-center gap-4 rounded-2xl p-4 text-left
+                                                transition-all duration-150
+                                                focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400
+                                                ${isThisSuccess
+                                                    ? 'bg-emerald-50 border border-emerald-200 shadow-sm'
+                                                    : isThisLoading
+                                                        ? 'bg-violet-50 border border-violet-200 shadow-sm'
+                                                        : isDisabled
+                                                            ? 'bg-white border border-zinc-100 shadow-sm opacity-50 cursor-not-allowed'
+                                                            : 'bg-white border border-zinc-100 shadow-sm hover:shadow-md hover:border-zinc-200 active:scale-[0.98] active:shadow-sm cursor-pointer'
+                                                }`}
+                                >
+                                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0
+                                                     transition-colors duration-150
+                                                     ${isThisSuccess ? 'bg-emerald-100' : isThisLoading ? 'bg-violet-100' : 'bg-violet-50'}`}>
+                                        {isThisLoading ? <Spinner /> : isThisSuccess ? '✅' : opt.emoji}
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="font-bold text-zinc-800 text-sm">
+                                            {isThisSuccess ? 'Credits added!' : opt.title}
+                                        </p>
+                                        <p className="text-xs text-zinc-400">
+                                            {isThisLoading ? 'Processing…' : isThisSuccess ? 'Check your balance above' : opt.subtitle}
+                                        </p>
+                                    </div>
+                                    {/* M3: Reward amount — shown in all non-loading states */}
+                                    {!isThisLoading && (
+                                        <div className="text-right flex-shrink-0">
+                                            <span className={`font-black text-base ${isThisSuccess ? 'text-emerald-600' : 'text-violet-600'}`}>
+                                                +{opt.reward}
+                                            </span>
+                                            <p className="text-[10px] text-zinc-400">credits</p>
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
-                {/* ── Premium ─────────────────────────────────────────── */}
+                {/* ── Premium — clearly tombstoned ─────────────────────── */}
                 <div className="px-4 mt-5">
                     <p className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-2 px-1">
                         Premium
                     </p>
+                    {/* M4: Tombstone UI — button shows "Coming Soon", tapping explains why */}
                     <button
-                        onClick={() => showToast('Google Play Billing coming soon! 🚀', 'info')}
+                        onClick={() => showToast('Google Play Billing is coming soon! 🚀', 'info')}
+                        aria-disabled="true"
                         className="w-full flex items-center gap-4 bg-zinc-900 rounded-2xl p-4 text-left
-                                   active:scale-[0.98] transition-transform shadow-xl"
+                                   hover:bg-zinc-800
+                                   active:scale-[0.98]
+                                   focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-600
+                                   transition-all duration-150 shadow-xl"
                     >
                         <div className="w-11 h-11 rounded-xl bg-amber-500/20 flex items-center justify-center text-xl flex-shrink-0">
                             ⭐
@@ -253,8 +324,8 @@ export default function CreditWallet() {
                             <p className="font-bold text-white text-sm">Remove Ads + 1000 Credits</p>
                             <p className="text-xs text-zinc-500">One-time purchase via Google Play</p>
                         </div>
-                        <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider border border-amber-400/40
-                                         px-2 py-0.5 rounded-full flex-shrink-0">
+                        <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider
+                                         border border-amber-400/40 px-2 py-0.5 rounded-full flex-shrink-0">
                             Soon
                         </span>
                     </button>

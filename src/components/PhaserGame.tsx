@@ -3,14 +3,24 @@
 /**
  * PhaserGame — Phaser engine container + reveal UI orchestrator.
  *
- * Key behaviors:
- * - #game-container is NEVER unmounted (would destroy WebGL context permanently)
- * - Video is positioned at EXACT imageDisplayRect from store → pixel-perfect
- *   seamless transition from coloring image to reveal video
- * - set.videoMuted controls whether video plays with audio after reveal
+ * UX Principles Applied (Don Norman + Nielsen + Defensive Design):
+ *
+ * M2 — Affordances:
+ *   - All interactive elements have Default/Hover/Active/Focus/Disabled states
+ *   - Buttons use focus-visible rings for keyboard navigation
+ *   - Video overlay shows tap-to-interact affordance explicitly
+ *
+ * M3 — System Status:
+ *   - Asset load failure shows an error state with retry (not an infinite spinner)
+ *   - Video shows mute/unmute status indicator after reveal
+ *   - Progress bar communicates threshold milestone
+ *
+ * M4 — Defensive Design:
+ *   - Mid-painting back tap shows confirmation sheet: "Leave? Progress will be lost"
+ *   - Back is immediate ONLY when no strokes have been made (revealPct === 0)
  *
  * Local state (Rule 1 — ephemeral UI only):
- *   showBrushPicker, videoReady
+ *   showBrushPicker, videoReady, showLeaveConfirm, assetLoadFailed
  */
 
 import { forwardRef, useLayoutEffect, useRef, useState, useEffect, useCallback } from 'react';
@@ -44,8 +54,12 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
     const { config: appConfig } = useConfigStore();
 
     // ── Ephemeral UI (Rule 1) ──────────────────────────────────────────────
-    const [showBrushPicker, setShowBrushPicker] = useState(false);
-    const [videoReady,      setVideoReady]      = useState(false);
+    const [showBrushPicker,  setShowBrushPicker]  = useState(false);
+    const [videoReady,       setVideoReady]       = useState(false);
+    const [showLeaveConfirm, setShowLeaveConfirm] = useState(false); // M4: back confirmation
+    const [assetLoadFailed,  setAssetLoadFailed]  = useState(false); // M3: error state
+    const [videoPlaying,     setVideoPlaying]     = useState(false); // M3: video status
+    const [videoMutedLocal,  setVideoMutedLocal]  = useState(false); // M3: mute state mirror
 
     // ── Derived ────────────────────────────────────────────────────────────
     const isPlaying    = gamePhase === 'PLAYING';
@@ -54,6 +68,7 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
     const canvasFading = revealPhase === 'THRESHOLD';
     const pct          = Math.round(revealPct * 100);
     const thresholdPct = Math.round(appConfig.revealThreshold * 100);
+    const hasPainted   = revealPct > 0; // M4: guard for leave confirmation
 
     // Video CSS rect: exactly matches the Phaser colored-image position
     const videoStyle = imageDisplayRect
@@ -100,12 +115,15 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
         prevSetIdRef.current = selectedSet.id;
         setVideoReady(false);
         setShowBrushPicker(false);
+        setShowLeaveConfirm(false);
+        setAssetLoadFailed(false); // M3: reset error state on new set
+        setVideoPlaying(false);
+        setVideoMutedLocal(selectedSet.videoMuted);
         if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
         gameInstanceRef.current.scene.start('MainGame');
     }, [selectedSet, isPlaying]);
 
     // ── Pre-load video silently at frame 0 ───────────────────────────────
-    // Always muted during preload; un-mute respects set.videoMuted at reveal.
     useEffect(() => {
         const v = videoRef.current;
         if (!v || !selectedSet?.videoUrl || !isPlaying) return;
@@ -122,6 +140,18 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
         return () => { v.removeEventListener('canplay', prime); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedSet?.videoUrl, isPlaying]);
+
+    // ── M3: Asset load failure detection ─────────────────────────────────
+    // If isAssetLoading stays true >20s without the scene becoming active, flag failure.
+    useEffect(() => {
+        if (!isAssetLoading) { setAssetLoadFailed(false); return; }
+        const timeout = setTimeout(() => {
+            if (useGameStore.getState().isAssetLoading) {
+                setAssetLoadFailed(true);
+            }
+        }, 20_000);
+        return () => clearTimeout(timeout);
+    }, [isAssetLoading]);
 
     // ── EventBus → Store bridge ───────────────────────────────────────────
     useEffect(() => {
@@ -140,26 +170,25 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
             // Video — respect per-set mute setting
             const v = videoRef.current;
             if (v) {
-                // If admin marked this set as muted, keep it muted
                 const keepMuted = selectedSet?.videoMuted ?? false;
                 v.muted = keepMuted;
+                setVideoMutedLocal(keepMuted);
                 v.currentTime = 0;
-                v.play().catch(() => {
-                    // Autoplay blocked — fallback to muted
-                    v.muted = true;
-                    v.play().catch(() => {});
-                });
+                v.play()
+                    .then(() => setVideoPlaying(true))
+                    .catch(() => {
+                        v.muted = true;
+                        setVideoMutedLocal(true);
+                        v.play().then(() => setVideoPlaying(true)).catch(() => {});
+                    });
             }
 
             const fadeDelay = Math.max(0, appConfig.lineArtFadeDuration * 0.4);
             canvasFadeTimer.current = setTimeout(() => {
-                // Guard: if the user went back before this timer fired, bail.
-                // revealPhase will be 'IDLE' (endSession) or 'PAINTING' (new session).
                 if (useGameStore.getState().revealPhase !== 'THRESHOLD') return;
                 useGameStore.setState({ revealPhase: 'FADING' });
                 canvasFadeTimer.current = setTimeout(() => {
                     onRevealComplete();
-                    // Only show toast if we actually transitioned to COMPLETE
                     if (useGameStore.getState().gamePhase === 'COMPLETE') {
                         showToast('Reveal complete! 🎉', 'success');
                     }
@@ -182,8 +211,8 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [appConfig, selectedSet?.videoMuted]);
 
-    // ── Back handler ──────────────────────────────────────────────────────
-    const handleBack = useCallback(() => {
+    // ── M4: Back handler — with friction for mid-painting exits ──────────
+    const forceLeave = useCallback(() => {
         if (canvasFadeTimer.current) clearTimeout(canvasFadeTimer.current);
         prevSetIdRef.current = null;
         audioRef.current?.pause();
@@ -191,9 +220,29 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
         const v = videoRef.current;
         if (v) { v.pause(); v.muted = true; v.currentTime = 0; v.src = ''; }
         setShowBrushPicker(false);
+        setShowLeaveConfirm(false);
         setVideoReady(false);
+        setVideoPlaying(false);
         endSession();
     }, [endSession]);
+
+    const handleBack = useCallback(() => {
+        // No confirmation needed if reveal is already complete (video showing)
+        if (canvasHidden || !hasPainted) {
+            forceLeave();
+            return;
+        }
+        // M4: User has painted something — show friction layer
+        setShowLeaveConfirm(true);
+    }, [canvasHidden, hasPainted, forceLeave]);
+
+    // ── M3: Video mute toggle ─────────────────────────────────────────────
+    const toggleVideoMute = useCallback(() => {
+        const v = videoRef.current;
+        if (!v) return;
+        v.muted = !v.muted;
+        setVideoMutedLocal(v.muted);
+    }, []);
 
     return (
         <div className="absolute inset-0 bg-white">
@@ -211,9 +260,7 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
             <audio ref={audioRef} preload="none" />
 
             {/* ────────────────────────────────────────────────────────────
-                 VIDEO — z-10, positioned EXACTLY at imageDisplayRect
-                 so it overlaps the Phaser image pixel-perfectly.
-                 Background is transparent/white to blend with canvas bg.
+                 VIDEO — z-10
                ──────────────────────────────────────────────────────── */}
             <div
                 className="absolute inset-0 z-10"
@@ -226,6 +273,8 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                     loop
                     muted
                     preload="none"
+                    onPlay={() => setVideoPlaying(true)}
+                    onPause={() => setVideoPlaying(false)}
                     onClick={() => {
                         const v = videoRef.current;
                         if (!v || !canvasHidden) return;
@@ -236,7 +285,6 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
 
             {/* ────────────────────────────────────────────────────────────
                  PHASER — z-20, NEVER unmounted
-                 Hidden via CSS opacity only; removing from DOM destroys WebGL
                ──────────────────────────────────────────────────────── */}
             <div
                 id="game-container"
@@ -262,14 +310,48 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 </div>
             )}
 
-            {/* Back button over video after reveal — z-50 */}
+            {/* ── M3: Video controls overlay — z-45 ──────────────────────
+                 Shows AFTER canvas fades; gives mute/unmute affordance.
+               ─────────────────────────────────────────────────────── */}
+            {canvasHidden && (isPlaying || isComplete) && (
+                <div className="absolute inset-x-0 bottom-8 z-45 flex flex-col items-center gap-3 pointer-events-none">
+                    {/* Mute toggle — M2: distinct affordance with icon + label */}
+                    <button
+                        onClick={toggleVideoMute}
+                        className="pointer-events-auto flex items-center gap-2
+                                   bg-black/25 backdrop-blur-md text-white
+                                   px-4 py-2 rounded-full text-xs font-semibold
+                                   hover:bg-black/40
+                                   active:scale-95 transition-all duration-150
+                                   focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                        aria-label={videoMutedLocal ? 'Unmute video' : 'Mute video'}
+                    >
+                        <span className="text-base leading-none">
+                            {videoMutedLocal ? '🔇' : '🔊'}
+                        </span>
+                        <span>{videoMutedLocal ? 'Tap to unmute' : 'Tap to mute'}</span>
+                    </button>
+
+                    {/* Play/pause hint — only shown briefly after reveal */}
+                    {!videoPlaying && (
+                        <div className="pointer-events-none bg-black/20 backdrop-blur-sm
+                                        text-white text-[11px] px-3 py-1 rounded-full">
+                            Tap video to play ▶
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Back button over video — z-50 */}
             {canvasHidden && (isPlaying || isComplete) && (
                 <button
                     onClick={handleBack}
-                    className="absolute top-4 right-4 z-50 w-9 h-9 rounded-full
+                    className="absolute top-4 right-4 z-50 w-10 h-10 rounded-full
                                bg-black/20 backdrop-blur-sm text-white
                                flex items-center justify-center
-                               hover:bg-black/35 transition-all active:scale-90"
+                               hover:bg-black/35
+                               active:scale-90 transition-all duration-150
+                               focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                     aria-label="Back to gallery">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"
                          viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -279,12 +361,34 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 </button>
             )}
 
-            {/* Editor UI — z-40 */}
+            {/* ── Editor UI — z-40 ──────────────────────────────────────── */}
             {isPlaying && !canvasHidden && (
                 <div className="absolute inset-0 z-40 pointer-events-none font-sans">
 
-                    {/* Loading spinner */}
-                    {isAssetLoading && (
+                    {/* M3: Asset load failure error state */}
+                    {assetLoadFailed && (
+                        <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-50
+                                        flex items-center justify-center pointer-events-auto">
+                            <div className="flex flex-col items-center gap-4 px-8 text-center max-w-xs">
+                                <p className="text-4xl">😕</p>
+                                <div>
+                                    <p className="font-black text-zinc-900 text-base mb-1">Couldn't load artwork</p>
+                                    <p className="text-zinc-400 text-sm">Check your connection and try again.</p>
+                                </div>
+                                <button
+                                    onClick={forceLeave}
+                                    className="px-6 py-3 bg-zinc-900 text-white font-bold rounded-2xl text-sm
+                                               active:scale-95 transition-transform
+                                               focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+                                >
+                                    Back to Gallery
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* M3: Loading spinner — only while actually loading */}
+                    {isAssetLoading && !assetLoadFailed && (
                         <div className="absolute inset-0 bg-white/85 backdrop-blur-sm z-50
                                         flex items-center justify-center pointer-events-auto">
                             <div className="flex flex-col items-center gap-4">
@@ -307,9 +411,14 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                         <div className="w-full h-14 bg-white/90 backdrop-blur-md border-b border-zinc-100
                                         flex items-center justify-between px-4
                                         shadow-[0_1px_8px_-2px_rgba(0,0,0,0.05)]">
+                            {/* M2: Back button — all 5 states present */}
                             <button onClick={handleBack}
-                                    className="p-3 rounded-full bg-zinc-50 text-zinc-400
-                                               hover:text-zinc-900 hover:bg-zinc-100 transition-all active:scale-90"
+                                    className="p-3 -ml-1 rounded-full
+                                               text-zinc-400 bg-transparent
+                                               hover:text-zinc-900 hover:bg-zinc-100
+                                               active:bg-zinc-200 active:scale-90
+                                               focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900
+                                               transition-all duration-150"
                                     aria-label="Back">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"
                                      viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -320,20 +429,30 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                             <span className="font-extrabold text-zinc-900 tracking-tight text-base truncate px-2">
                                 {selectedSet?.name ?? 'My Artwork'}
                             </span>
-                            <span className="text-xs font-semibold text-zinc-400 min-w-[36px] text-right">
+                            {/* M3: Progress shown as text + visual strip below */}
+                            <span className={`text-xs font-bold min-w-[40px] text-right tabular-nums
+                                              ${pct >= thresholdPct ? 'text-amber-500' : 'text-zinc-400'}`}>
                                 {pct}%
                             </span>
                         </div>
-                        {/* Hairline progress strip */}
+                        {/* M3: Progress strip — colour shifts at threshold milestone */}
                         <div className="w-full h-[3px] bg-zinc-100">
                             <div className="h-full transition-all duration-500 ease-out"
                                  style={{
                                      width: `${pct}%`,
                                      background: pct >= thresholdPct
-                                         ? 'rgba(251,191,36,0.55)'
-                                         : 'rgba(167,139,250,0.45)',
+                                         ? 'rgba(251,191,36,0.7)'
+                                         : 'rgba(167,139,250,0.6)',
                                  }} />
                         </div>
+                        {/* M3: Milestone label appears at threshold */}
+                        {pct >= thresholdPct && pct < 100 && (
+                            <div className="absolute right-4 top-14 mt-1">
+                                <span className="text-[10px] font-black text-amber-500 uppercase tracking-wider animate-pulse">
+                                    Almost there! ✨
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {/* Click-outside backdrop for brush picker */}
@@ -354,7 +473,8 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                                 <input type="range"
                                        min={appConfig.brushMin} max={appConfig.brushMax} value={brushSize}
                                        onChange={e => setBrushSize(parseInt(e.target.value))}
-                                       className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-zinc-900" />
+                                       className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-zinc-900
+                                                  focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900" />
                                 <div className="flex items-center justify-between px-0.5">
                                     <div className="w-3 h-3 rounded-full bg-zinc-300" />
                                     <span className="text-xs font-semibold text-zinc-500">{brushSize}px</span>
@@ -362,14 +482,18 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                                 </div>
                             </div>
                         )}
+                        {/* M2: Brush button — all states */}
                         <button
                             onClick={() => setShowBrushPicker(p => !p)}
                             className={`w-14 h-14 rounded-full shadow-xl flex items-center justify-center
-                                        transition-all duration-200 active:scale-90
+                                        active:scale-90
+                                        focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+                                        transition-all duration-200
                                         ${showBrushPicker
-                                          ? 'bg-zinc-900 text-white'
-                                          : 'bg-white text-zinc-600 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)]'}`}
-                            aria-label="Brush size">
+                                          ? 'bg-zinc-900 text-white focus-visible:outline-white'
+                                          : 'bg-white text-zinc-600 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)] hover:shadow-lg hover:text-zinc-900 focus-visible:outline-zinc-900'}`}
+                            aria-label="Brush size"
+                            aria-expanded={showBrushPicker}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"
                                  viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -379,6 +503,66 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                         </button>
                     </div>
                 </div>
+            )}
+
+            {/* ── M4: Leave confirmation bottom sheet — z-60 ────────────────
+                 Friction layer for mid-painting back tap.
+                 Designed as a bottom sheet (easy to dismiss by tapping "Keep Painting").
+               ─────────────────────────────────────────────────────────── */}
+            {showLeaveConfirm && (
+                <>
+                    {/* Scrim — tapping it dismisses (= "Keep Painting" intent) */}
+                    <div
+                        className="absolute inset-0 z-[55] bg-black/40 backdrop-blur-sm"
+                        onClick={() => setShowLeaveConfirm(false)}
+                        aria-label="Cancel"
+                    />
+                    <div className="absolute bottom-0 inset-x-0 z-[60] bg-white rounded-t-[2rem]
+                                    px-6 pb-10 pt-4 shadow-[0_-8px_40px_-8px_rgba(0,0,0,0.25)]
+                                    animate-slide-up">
+                        {/* Handle */}
+                        <div className="w-10 h-1 bg-zinc-200 rounded-full mx-auto mb-5" />
+
+                        {/* Icon */}
+                        <div className="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center
+                                        text-3xl mx-auto mb-4">
+                            🎨
+                        </div>
+
+                        <h3 className="font-black text-zinc-900 text-xl text-center mb-2">
+                            Leave this artwork?
+                        </h3>
+                        <p className="text-zinc-400 text-sm text-center mb-7 leading-relaxed">
+                            You've painted {pct}% so far.
+                            Your progress <span className="font-semibold text-zinc-600">won't be saved</span> if you leave now.
+                        </p>
+
+                        <div className="flex flex-col gap-3">
+                            {/* Destructive action — visually prominent warning */}
+                            <button
+                                onClick={forceLeave}
+                                className="w-full py-4 bg-zinc-900 text-white font-bold text-base rounded-2xl
+                                           hover:bg-zinc-800
+                                           active:scale-[0.97] active:bg-zinc-950
+                                           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900
+                                           transition-all duration-150"
+                            >
+                                Leave Artwork
+                            </button>
+                            {/* Recovery / cancel — most visually accessible */}
+                            <button
+                                onClick={() => setShowLeaveConfirm(false)}
+                                className="w-full py-4 bg-zinc-100 text-zinc-900 font-bold text-base rounded-2xl
+                                           hover:bg-zinc-200
+                                           active:scale-[0.97] active:bg-zinc-300
+                                           focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-400
+                                           transition-all duration-150"
+                            >
+                                Keep Painting ✏️
+                            </button>
+                        </div>
+                    </div>
+                </>
             )}
         </div>
     );

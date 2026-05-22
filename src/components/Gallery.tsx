@@ -218,8 +218,10 @@ export default function Gallery() {
                                             className="group relative aspect-[3/4] rounded-3xl overflow-hidden
                                                        bg-zinc-100 shadow-sm
                                                        transition-all duration-200
-                                                       active:scale-[0.96] active:shadow-lg
-                                                       disabled:opacity-70"
+                                                       hover:-translate-y-0.5 hover:shadow-lg
+                                                       active:scale-[0.96] active:shadow-sm active:translate-y-0
+                                                       focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400
+                                                       disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm"
                                         >
                                             {/* Colored art */}
                                             {set.coloredArtUrl && (

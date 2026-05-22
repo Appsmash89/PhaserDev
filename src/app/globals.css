@@ -69,3 +69,38 @@ body {
 .rotate-6  { transform: rotate(6deg);  }
 .-rotate-8 { transform: rotate(-8deg); }
 .rotate-3  { transform: rotate(3deg);  }
+
+/* ── Bottom-sheet slide-up (M4: Leave confirmation) ───────────── */
+@keyframes slide-up {
+  0%   { transform: translateY(100%); }
+  100% { transform: translateY(0);    }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* ── Credit balance pop (M3: System Status) ───────────────────── */
+@keyframes credit-pop {
+  0%   { transform: scale(1);    }
+  40%  { transform: scale(1.12); }
+  100% { transform: scale(1);    }
+}
+
+.animate-credit-pop {
+  animation: credit-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── M2: Global interactive baseline ─────────────────────────── */
+/* All buttons are pointer by default — removes ambiguity */
+button:not(:disabled) { cursor: pointer; }
+button:disabled       { cursor: not-allowed; }
+
+/* M2: Focus-visible ring — clean outline, no default browser ring */
+:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.7);
+  outline-offset: 2px;
+}
+
+/* Suppress default outline — we manage it via focus-visible */
+:focus:not(:focus-visible) { outline: none; }

@@ -223,7 +223,11 @@ export default function GalleryManager() {
     const setFile = (setter: React.Dispatch<React.SetStateAction<FileSlot>>, isImage: boolean) =>
         (file: File) => setter({ file, preview: isImage ? URL.createObjectURL(file) : null });
 
-    const readyToUpload = name.trim() && lineArt.file && colored.file && audio.file && video.file;
+    // At least a name + one asset is enough to create/upload a set.
+    // Audio and video are optional — not every set needs all four assets.
+    const hasAtLeastOneFile = !!(lineArt.file || colored.file || audio.file || video.file);
+    const readyToUpload = name.trim().length > 0 && hasAtLeastOneFile;
+
 
     const handleUpload = async () => {
         if (!readyToUpload) return;

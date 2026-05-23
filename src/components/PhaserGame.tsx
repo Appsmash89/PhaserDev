@@ -189,9 +189,7 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 useGameStore.setState({ revealPhase: 'FADING' });
                 canvasFadeTimer.current = setTimeout(() => {
                     onRevealComplete();
-                    if (useGameStore.getState().gamePhase === 'COMPLETE') {
-                        showToast('Reveal complete! 🎉', 'success');
-                    }
+                    // No toast — keep image→video transition clean and uninterrupted
                 }, appConfig.coloredFadeDuration + 100);
             }, fadeDelay);
         };
@@ -310,36 +308,39 @@ export const PhaserGame = forwardRef<IRefPhaserGame>(function PhaserGame(_, ref)
                 </div>
             )}
 
-            {/* ── M3: Video controls overlay — z-45 ──────────────────────
-                 Shows AFTER canvas fades; gives mute/unmute affordance.
+            {/* ── M3: Mute toggle — Instagram-style, icon-only, bottom-right ───
+                 Wireframe SVG, no colour — doesn't leak user attention.
+                 Positioned like Instagram Reels mute button.
                ─────────────────────────────────────────────────────── */}
             {canvasHidden && (isPlaying || isComplete) && (
-                <div className="absolute inset-x-0 bottom-8 z-45 flex flex-col items-center gap-3 pointer-events-none">
-                    {/* Mute toggle — M2: distinct affordance with icon + label */}
-                    <button
-                        onClick={toggleVideoMute}
-                        className="pointer-events-auto flex items-center gap-2
-                                   bg-black/25 backdrop-blur-md text-white
-                                   px-4 py-2 rounded-full text-xs font-semibold
-                                   hover:bg-black/40
-                                   active:scale-95 transition-all duration-150
-                                   focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                        aria-label={videoMutedLocal ? 'Unmute video' : 'Mute video'}
-                    >
-                        <span className="text-base leading-none">
-                            {videoMutedLocal ? '🔇' : '🔊'}
-                        </span>
-                        <span>{videoMutedLocal ? 'Tap to unmute' : 'Tap to mute'}</span>
-                    </button>
-
-                    {/* Play/pause hint — only shown briefly after reveal */}
-                    {!videoPlaying && (
-                        <div className="pointer-events-none bg-black/20 backdrop-blur-sm
-                                        text-white text-[11px] px-3 py-1 rounded-full">
-                            Tap video to play ▶
-                        </div>
+                <button
+                    onClick={toggleVideoMute}
+                    className="absolute bottom-24 right-4 z-[45] w-9 h-9 rounded-full
+                               bg-black/30 backdrop-blur-sm
+                               flex items-center justify-center
+                               hover:bg-black/50
+                               active:scale-90 transition-all duration-150
+                               focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                    aria-label={videoMutedLocal ? 'Unmute video' : 'Mute video'}
+                >
+                    {videoMutedLocal ? (
+                        // Speaker-off (muted) — outline only, white
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                             stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <line x1="23" y1="9" x2="17" y2="15"/>
+                            <line x1="17" y1="9" x2="23" y2="15"/>
+                        </svg>
+                    ) : (
+                        // Speaker-on — outline only, white
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                             stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                        </svg>
                     )}
-                </div>
+                </button>
             )}
 
             {/* Back button over video — z-50 */}

@@ -259,6 +259,127 @@ export default function DevToolsPage() {
                         </div>
                     </div>
                 )}
+
+                {/* ── History Replay Gate ──────────────────────────────── */}
+                {saved && (
+                    <div className="bg-zinc-900/60 border border-white/5 rounded-2xl p-5 flex flex-col gap-4">
+                        <div>
+                            <p className="font-bold text-white text-sm mb-0.5">History Replay Gate</p>
+                            <p className="text-xs text-zinc-500 leading-relaxed">
+                                When enabled, users must complete a task to replay a free completed set from History.
+                                Paid/unlocked sets are always replayable for free.
+                            </p>
+                        </div>
+
+                        {/* Master toggle */}
+                        <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-zinc-300">Enable task gate</p>
+                            <button
+                                onClick={() => {
+                                    const next = !saved.historyTaskEnabled;
+                                    const updated = { ...saved, historyTaskEnabled: next };
+                                    setSaved(updated);
+                                    fetch('/api/config', {
+                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ historyTaskEnabled: next }),
+                                    }).catch(() => {});
+                                }}
+                                className={`relative w-12 h-6 rounded-full transition-colors duration-200
+                                            ${saved.historyTaskEnabled ? 'bg-emerald-600' : 'bg-zinc-700'}`}
+                            >
+                                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow
+                                                 transition-transform duration-200
+                                                 ${saved.historyTaskEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+
+                        {/* Task type selector — only visible when enabled */}
+                        {saved.historyTaskEnabled && (
+                            <>
+                                <div className="flex flex-col gap-2">
+                                    <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Task type</p>
+                                    {(['watch_ad', 'click_affiliate', 'spend_credits'] as const).map(type => {
+                                        const labels: Record<string, string> = {
+                                            watch_ad:        'Watch a short ad',
+                                            click_affiliate: 'Visit a partner link',
+                                            spend_credits:   'Spend credits',
+                                        };
+                                        const active = saved.historyTaskType === type;
+                                        return (
+                                            <button
+                                                key={type}
+                                                onClick={() => {
+                                                    const updated = { ...saved, historyTaskType: type };
+                                                    setSaved(updated);
+                                                    fetch('/api/config', {
+                                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ historyTaskType: type }),
+                                                    }).catch(() => {});
+                                                }}
+                                                className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-semibold text-left
+                                                            transition-all duration-150
+                                                            ${active
+                                                              ? 'border-violet-500 bg-violet-500/10 text-violet-300'
+                                                              : 'border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-500'}`}
+                                            >
+                                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0
+                                                                ${active ? 'border-violet-500' : 'border-zinc-600'}`}>
+                                                    {active && <div className="w-2 h-2 rounded-full bg-violet-500" />}
+                                                </div>
+                                                {labels[type]}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Conditional: credit cost */}
+                                {saved.historyTaskType === 'spend_credits' && (
+                                    <div className="flex items-center gap-3">
+                                        <label className="text-xs font-semibold text-zinc-400 flex-1">Credit cost</label>
+                                        <input
+                                            type="number" min={1} max={1000}
+                                            value={saved.historyTaskCreditCost}
+                                            onChange={e => {
+                                                const v = Math.max(1, Math.min(1000, parseInt(e.target.value) || 1));
+                                                setSaved(prev => prev ? { ...prev, historyTaskCreditCost: v } : prev);
+                                            }}
+                                            onBlur={e => {
+                                                const v = parseInt(e.target.value) || 30;
+                                                fetch('/api/config', {
+                                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ historyTaskCreditCost: v }),
+                                                }).catch(() => {});
+                                            }}
+                                            className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
+                                                       text-white text-sm text-right focus:outline-none focus:border-violet-500 font-mono"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Conditional: affiliate URL */}
+                                {saved.historyTaskType === 'click_affiliate' && (
+                                    <div className="flex flex-col gap-1.5">
+                                        <label className="text-xs font-semibold text-zinc-400">Partner URL</label>
+                                        <input
+                                            type="url"
+                                            value={saved.historyTaskAffiliateUrl}
+                                            onChange={e => setSaved(prev => prev ? { ...prev, historyTaskAffiliateUrl: e.target.value } : prev)}
+                                            onBlur={e => {
+                                                fetch('/api/config', {
+                                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ historyTaskAffiliateUrl: e.target.value }),
+                                                }).catch(() => {});
+                                            }}
+                                            placeholder="https://…"
+                                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
+                                                       text-white text-sm focus:outline-none focus:border-violet-500 font-mono"
+                                        />
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Action bar */}

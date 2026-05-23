@@ -14,27 +14,37 @@ import { devtools } from 'zustand/middleware';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AppConfig {
-    revealThreshold:     number;   // 0.0–1.0
-    brushMin:            number;   // px
-    brushMax:            number;   // px
-    brushDefault:        number;   // px
-    audioVolume:         number;   // 0.0–1.0
-    lineArtFadeDuration: number;   // ms
-    coloredFadeDuration: number;   // ms
-    glitterEnabled:      boolean;
-    glitterDuration:     number;   // ms
+    revealThreshold:          number;   // 0.0–1.0
+    brushMin:                 number;   // px
+    brushMax:                 number;   // px
+    brushDefault:             number;   // px
+    audioVolume:              number;   // 0.0–1.0
+    lineArtFadeDuration:      number;   // ms
+    coloredFadeDuration:      number;   // ms
+    glitterEnabled:           boolean;
+    glitterDuration:          number;   // ms
+    // ── History replay gate ─────────────────────────────────────────────
+    historyTaskEnabled:       boolean;  // master toggle
+    historyTaskType:          'watch_ad' | 'click_affiliate' | 'spend_credits';
+    historyTaskCreditCost:    number;   // only used when type=spend_credits
+    historyTaskAffiliateUrl:  string;   // only used when type=click_affiliate
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-    revealThreshold:     0.75,
-    brushMin:            10,
-    brushMax:            80,
-    brushDefault:        40,
-    audioVolume:         0.85,
-    lineArtFadeDuration: 700,
-    coloredFadeDuration: 900,
-    glitterEnabled:      true,
-    glitterDuration:     1100,
+    revealThreshold:          0.75,
+    brushMin:                 10,
+    brushMax:                 80,
+    brushDefault:             40,
+    audioVolume:              0.85,
+    lineArtFadeDuration:      700,
+    coloredFadeDuration:      900,
+    glitterEnabled:           true,
+    glitterDuration:          1100,
+    // ── History task defaults ────────────────────────────────────────────
+    historyTaskEnabled:       false,
+    historyTaskType:          'watch_ad',
+    historyTaskCreditCost:    30,
+    historyTaskAffiliateUrl:  'https://www.canva.com',
 };
 
 type FetchStatus = 'idle' | 'loading' | 'success' | 'error';

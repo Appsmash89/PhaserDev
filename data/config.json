@@ -7,5 +7,9 @@
   "lineArtFadeDuration": 50,
   "coloredFadeDuration": 50,
   "glitterEnabled": false,
-  "glitterDuration": 2500
+  "glitterDuration": 2500,
+  "historyTaskEnabled": true,
+  "historyTaskType": "click_affiliate",
+  "historyTaskCreditCost": 30,
+  "historyTaskAffiliateUrl": "https://www.amazon.com"
 }
